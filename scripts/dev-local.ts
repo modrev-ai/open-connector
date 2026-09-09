@@ -8,12 +8,19 @@ interface DevProcess {
 }
 
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+// Node refuses to spawn `.cmd` shims without a shell, so `npm.cmd` fails with `EINVAL`
+// unless one is requested. Only the npm process needs it; the API process is `node`
+// itself. The arguments below are literal flags with no spaces or shell metacharacters,
+// so passing them through `cmd.exe` does not change how they are parsed.
+const npmNeedsShell = process.platform === "win32";
 
 runChecked(process.execPath, ["scripts/ensure-generated.ts"]);
 
 const processes: DevProcess[] = [
   startProcess("api", process.execPath, ["src/server/index.ts"]),
-  startProcess("web", npmCommand, ["run", "dev", "--workspace", "web", "--", "--clearScreen", "false"]),
+  startProcess("web", npmCommand, ["run", "dev", "--workspace", "web", "--", "--clearScreen", "false"], {
+    shell: npmNeedsShell,
+  }),
 ];
 
 console.log("API runtime: http://localhost:3000");
@@ -32,12 +39,13 @@ function runChecked(command: string, args: string[]): void {
   }
 }
 
-function startProcess(name: string, command: string, args: string[]): DevProcess {
+function startProcess(name: string, command: string, args: string[], options: { shell?: boolean } = {}): DevProcess {
   return {
     name,
     child: spawn(command, args, {
       cwd: process.cwd(),
       stdio: "inherit",
+      shell: options.shell ?? false,
     }),
   };
 }
