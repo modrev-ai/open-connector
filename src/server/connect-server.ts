@@ -685,7 +685,7 @@ export class ConnectServer {
   }
 
   private async handleMcp(context: Context): Promise<Response> {
-    const handler = createMcpHandler(
+    const handler = createQuietMcpHandler(
       () =>
         createMcpServer({
           catalog: this.options.catalog,
@@ -1076,6 +1076,33 @@ export class ConnectServer {
       );
       throw new Error("Runtime policy is unavailable.");
     }
+  }
+}
+
+// `@modelcontextprotocol/server` warns on every `createMcpHandler` call that sets
+// `responseMode: "json"`. The mode is deliberate here: MCP tool calls in this runtime are
+// plain request/response and emit no notifications before their result, so nothing is
+// actually dropped. `handleMcp` rebuilds the handler per request, so the unfiltered warning
+// repeats on every `/mcp` call. Matching the exact text keeps any reworded or unrelated
+// warning visible, and `createMcpHandler` is synchronous, so no other call can interleave
+// while `console.warn` is swapped out.
+const mcpJsonResponseModeWarning =
+  "responseMode: 'json' drops mid-call notifications. subscriptions/listen streams are always served over SSE regardless; other notifications emitted before a result are dropped.";
+
+function createQuietMcpHandler(...args: Parameters<typeof createMcpHandler>): ReturnType<typeof createMcpHandler> {
+  const warn = console.warn;
+  console.warn = (...values: unknown[]) => {
+    if (values[0] === mcpJsonResponseModeWarning) {
+      return;
+    }
+
+    warn(...values);
+  };
+
+  try {
+    return createMcpHandler(...args);
+  } finally {
+    console.warn = warn;
   }
 }
 
