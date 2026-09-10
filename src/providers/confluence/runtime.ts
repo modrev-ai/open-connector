@@ -105,7 +105,12 @@ export const confluenceActionHandlers: Record<ConfluenceActionName, ConfluenceAc
         "body-format": optionalString(input.bodyFormat),
       }),
     });
-    return { page: normalizePage(payload) };
+    const page = normalizePage(payload);
+    // Confluence omits the page body unless `body-format` is set, so a caller that leaves
+    // `bodyFormat` unset gets a successful read carrying an empty body and no indication
+    // that content was withheld. Report it, so a body-less read is distinguishable from a
+    // page that genuinely has no content.
+    return { page, bodyIncluded: hasBodyRepresentation(page.body) };
   },
   async create_page(input, context): Promise<unknown> {
     const payload = await requestConfluenceJson({
@@ -409,6 +414,12 @@ function normalizeSpace(value: unknown): Record<string, unknown> {
     homepageId: optionalString(object.homepageId ?? optionalRecord(object.homepage)?.id) ?? null,
     raw: object,
   });
+}
+
+/** True when Confluence returned at least one body representation for a page. */
+function hasBodyRepresentation(body: unknown): boolean {
+  const record = optionalRecord(body);
+  return record !== undefined && Object.keys(record).length > 0;
 }
 
 function normalizePage(value: unknown): Record<string, unknown> {
