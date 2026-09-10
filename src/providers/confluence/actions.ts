@@ -100,7 +100,8 @@ export const confluenceActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "get_page",
-    description: "Get a Confluence page by ID and optionally include its body representation.",
+    description:
+      "Get a Confluence page by ID. The page body is returned only when bodyFormat is set; without it the response carries page metadata, an empty body, and bodyIncluded false.",
     requiredScopes: [confluencePageReadScope],
     inputSchema: s.object(
       "Input parameters for retrieving a Confluence page.",
@@ -118,6 +119,9 @@ export const confluenceActions: ActionDefinition[] = [
     ),
     outputSchema: s.object("The normalized Confluence page response.", {
       page: pageSchema,
+      bodyIncluded: s.boolean(
+        'Whether the page carries a body representation. False when bodyFormat was omitted or Confluence returned no body; pass bodyFormat (for example "storage") to retrieve page content.',
+      ),
     }),
   }),
   defineProviderAction(service, {

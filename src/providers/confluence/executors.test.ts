@@ -3,6 +3,7 @@ import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { Buffer } from "node:buffer";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { compactObject } from "../../core/cast.ts";
 import { credentialValidators, proxy } from "./executors.ts";
 import { confluenceActionHandlers, confluenceDefaultTimeoutMs, requestConfluenceJson } from "./runtime.ts";
 import { confluenceOAuthScopes } from "./scopes.ts";
@@ -173,6 +174,81 @@ describe("Confluence action routing", () => {
       }),
     ).rejects.toMatchObject({ status: 400, message: "Confluence REST v1 base URL is unavailable" });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("Confluence page body retrieval", () => {
+  interface GetPageResult {
+    page: { body: unknown; title?: unknown };
+    bodyIncluded: boolean;
+  }
+
+  const pagePayload = (body: unknown): Record<string, unknown> =>
+    compactObject({
+      id: "14483460",
+      status: "current",
+      title: "Seeded page",
+      spaceId: "space-1",
+      parentId: null,
+      createdAt: "2026-09-09T00:00:00.000Z",
+      version: { number: 3, minorEdit: false },
+      body,
+    });
+
+  const pageContext = {
+    baseUrl: "https://api.atlassian.com/ex/confluence/cloud-123/wiki/api/v2",
+    restApiBaseUrl: "https://api.atlassian.com/ex/confluence/cloud-123/wiki/rest/api",
+    auth: { type: "oauth2" as const, accessToken: "confluence-oauth-token", tokenType: "Bearer" },
+  };
+
+  it("flags the empty body when bodyFormat is omitted", async () => {
+    const fetcher: ProviderFetch = async (input) => {
+      const url = new URL(input.toString());
+      expect(url.pathname).toBe("/ex/confluence/cloud-123/wiki/api/v2/pages/14483460");
+      expect(url.searchParams.has("body-format")).toBe(false);
+      return Response.json(pagePayload({}));
+    };
+
+    const result = (await confluenceActionHandlers.get_page(
+      { pageId: "14483460" },
+      { ...pageContext, fetcher },
+    )) as GetPageResult;
+
+    expect(result.bodyIncluded).toBe(false);
+    expect(result.page.body).toEqual({});
+  });
+
+  it("flags the empty body when Confluence omits the body entirely", async () => {
+    const fetcher: ProviderFetch = async () => Response.json(pagePayload(undefined));
+
+    const result = (await confluenceActionHandlers.get_page(
+      { pageId: "14483460" },
+      { ...pageContext, fetcher },
+    )) as GetPageResult;
+
+    expect(result.bodyIncluded).toBe(false);
+    expect(result.page.body).toBeNull();
+  });
+
+  it("returns seeded content verbatim and reports the body as included", async () => {
+    const seededBody = {
+      storage: { representation: "storage", value: "<p>seeded read-back marker 4f21e9</p>" },
+    };
+    const fetcher: ProviderFetch = async (input) => {
+      const url = new URL(input.toString());
+      expect(url.searchParams.get("body-format")).toBe("storage");
+      return Response.json(pagePayload(seededBody));
+    };
+
+    const result = (await confluenceActionHandlers.get_page(
+      { pageId: "14483460", bodyFormat: "storage" },
+      { ...pageContext, fetcher },
+    )) as GetPageResult;
+
+    expect(result.bodyIncluded).toBe(true);
+    // Read back the exact seeded content, so a body that is dropped or rewritten in
+    // normalization fails here rather than passing as a successful read.
+    expect(result.page.body).toEqual(seededBody);
   });
 });
 
