@@ -107,6 +107,12 @@ export const jiraActionHandlers: ProviderActionHandlers<"jira", JiraActionHandle
   add_comment(input, context) {
     return addComment(input, context);
   },
+  list_transitions(input, context) {
+    return listTransitions(input, context);
+  },
+  transition_issue(input, context) {
+    return transitionIssue(input, context);
+  },
 };
 
 async function fetchJiraCurrentAccount(
@@ -516,6 +522,111 @@ async function addComment(input: Record<string, unknown>, context: JiraActionCon
 
   return {
     comment: normalizeComment(payload),
+  };
+}
+
+type JiraTransition = { id: string; name: string; to: { id: string; name: string }; raw: Record<string, unknown> };
+
+async function fetchTransitions(issueIdOrKey: string, context: JiraActionContext): Promise<JiraTransition[]> {
+  const payload = await jiraJsonRequest<Record<string, unknown>>({
+    accessToken: context.accessToken,
+    fetcher: context.fetcher,
+    providerMetadata: context.providerMetadata,
+    path: `/issue/${encodeURIComponent(issueIdOrKey)}/transitions`,
+    notFoundAsInvalidInput: true,
+    signal: context.signal,
+  });
+  return readRecordArray(payload.transitions).map((raw) => {
+    const to = asOptionalObject(raw.to) ?? {};
+    return {
+      id: String(raw.id ?? ""),
+      name: asOptionalString(raw.name) ?? "",
+      to: { id: String(to.id ?? ""), name: asOptionalString(to.name) ?? "" },
+      raw,
+    };
+  });
+}
+
+function describeTransitions(transitions: JiraTransition[]) {
+  if (!transitions.length) return "none";
+  return transitions.map((t) => `${t.id} "${t.name}" -> ${t.to.name || "?"}`).join(", ");
+}
+
+async function listTransitions(input: Record<string, unknown>, context: JiraActionContext) {
+  const issueIdOrKey = requireString(input.issueIdOrKey, "issueIdOrKey");
+  return { issueIdOrKey, transitions: await fetchTransitions(issueIdOrKey, context) };
+}
+
+/**
+ * Apply one transition and report where the issue actually landed. The status in the result
+ * is read back from Jira after the move, never echoed from the request: a transition's name
+ * need not be its target status (a "Work Complete" transition may lead to Done), and a
+ * workflow post-function can move the issue on, so a caller that trusted its own request
+ * would report the wrong one. A transition not available
+ * from the current status is refused before anything is sent, with the ones that are.
+ */
+async function transitionIssue(input: Record<string, unknown>, context: JiraActionContext) {
+  const issueIdOrKey = requireString(input.issueIdOrKey, "issueIdOrKey");
+  const wantedId = asOptionalString(input.transitionId);
+  const wantedName = asOptionalString(input.transitionName);
+  if (!wantedId && !wantedName) {
+    throw new ProviderRequestError(400, "transitionId or transitionName is required");
+  }
+
+  const available = await fetchTransitions(issueIdOrKey, context);
+  const matches = wantedId
+    ? available.filter((t) => t.id === wantedId)
+    : available.filter((t) => t.name === wantedName);
+  if (matches.length !== 1) {
+    const asked = wantedId ? `transition ${wantedId}` : `transition "${wantedName}"`;
+    const why = matches.length
+      ? "matches more than one available transition"
+      : "is not available from the issue's current status";
+    throw new ProviderRequestError(
+      400,
+      `${asked} ${why} for ${issueIdOrKey}; available: ${describeTransitions(available)}`,
+    );
+  }
+  const chosen = matches[0]!;
+
+  try {
+    await jiraRequest({
+      accessToken: context.accessToken,
+      fetcher: context.fetcher,
+      providerMetadata: context.providerMetadata,
+      path: `/issue/${encodeURIComponent(issueIdOrKey)}/transitions`,
+      method: "POST",
+      body: { transition: { id: chosen.id } },
+      notFoundAsInvalidInput: true,
+      signal: context.signal,
+    });
+  } catch (error) {
+    // Jira's own refusal (a condition or validator, or a status that moved meanwhile), with
+    // what is available now -- never a success.
+    if (error instanceof ProviderRequestError) {
+      const now = await fetchTransitions(issueIdOrKey, context).catch(() => undefined);
+      throw new ProviderRequestError(
+        error.status,
+        `jira refused transition ${chosen.id} "${chosen.name}" for ${issueIdOrKey}: ${error.message}; available now: ${now ? describeTransitions(now) : "unreadable"}`,
+      );
+    }
+    throw error;
+  }
+
+  const after = await jiraJsonRequest<Record<string, unknown>>({
+    accessToken: context.accessToken,
+    fetcher: context.fetcher,
+    providerMetadata: context.providerMetadata,
+    path: `/issue/${encodeURIComponent(issueIdOrKey)}`,
+    query: { fields: "status" },
+    notFoundAsInvalidInput: true,
+    signal: context.signal,
+  });
+  const landed = asOptionalObject(asOptionalObject(after.fields)?.status) ?? {};
+  return {
+    issueIdOrKey,
+    transition: { id: chosen.id, name: chosen.name },
+    status: { id: String(landed.id ?? ""), name: asOptionalString(landed.name) ?? "" },
   };
 }
 

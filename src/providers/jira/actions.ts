@@ -81,6 +81,23 @@ const comment = s.object(
   { additionalProperties: true, description: "Jira comment." },
 );
 
+const status = s.object(
+  {
+    id: s.string({ description: "Jira status ID." }),
+    name: s.string({ description: "Jira status name." }),
+  },
+  { required: ["id", "name"], additionalProperties: true, description: "Jira status." },
+);
+const transition = s.object(
+  {
+    id: s.string({ description: "Jira transition ID." }),
+    name: s.string({ description: "Jira transition name (not the target status)." }),
+    to: status,
+    raw: objectSchema,
+  },
+  { additionalProperties: true, description: "Jira workflow transition." },
+);
+
 const actions: JiraActionSource[] = [
   action(
     "list_projects",
@@ -205,6 +222,46 @@ const actions: JiraActionSource[] = [
     ),
     object({ comment }),
   ),
+  action(
+    "list_transitions",
+    "read",
+    'List the workflow transitions available to one Jira issue from its current status. A transition\'s name is not its target status ("Work Complete" can lead to Done), so each carries the status it leads to.',
+    jiraReadScopes,
+    input({ issueIdOrKey: s.string({ minLength: 1, description: "Jira issue ID or key." }) }, ["issueIdOrKey"]),
+    object({ issueIdOrKey: s.string({ description: "The issue asked about." }), transitions: s.array(transition) }),
+  ),
+  action(
+    "transition_issue",
+    "write",
+    "Move one Jira issue through a workflow transition, by transition ID (or its exact name), and return the status the issue actually landed in, read back from Jira. A transition not available from the issue's current status is refused with the transitions that are.",
+    jiraWriteScopes,
+    input(
+      {
+        issueIdOrKey: s.string({ minLength: 1, description: "Jira issue ID or key." }),
+        transitionId: s.string({
+          minLength: 1,
+          description: "Transition ID, as a string (from list_transitions). Takes precedence over transitionName.",
+        }),
+        transitionName: s.string({
+          minLength: 1,
+          description:
+            "Exact transition name, used when no transitionId is given; must name exactly one available transition.",
+        }),
+      },
+      ["issueIdOrKey"],
+    ),
+    object({
+      issueIdOrKey: s.string({ description: "The issue moved." }),
+      transition: s.object(
+        {
+          id: s.string({ description: "Transition ID applied." }),
+          name: s.string({ description: "Transition name." }),
+        },
+        { required: ["id", "name"], description: "The transition applied." },
+      ),
+      status: status,
+    }),
+  ),
 ];
 
 export type JiraActionName =
@@ -214,7 +271,9 @@ export type JiraActionName =
   | "get_issue"
   | "create_issue"
   | "list_issue_comments"
-  | "add_comment";
+  | "add_comment"
+  | "list_transitions"
+  | "transition_issue";
 
 export const jiraActions: ActionDefinition[] = actions.map((source) =>
   defineProviderAction(service, {
