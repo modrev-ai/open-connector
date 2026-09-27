@@ -1,4 +1,5 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { BearerProviderContext, ProviderRuntimeHandler } from "../provider-runtime.ts";
 import type { Client } from "@modelcontextprotocol/client";
 
@@ -7,16 +8,24 @@ import { SdkHttpError } from "@modelcontextprotocol/client";
 import { ProtocolError } from "@modelcontextprotocol/client";
 import { createHash } from "node:crypto";
 import { withMcpClient } from "../mcp-client.ts";
-import { defineBearerProviderExecutors, providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
+import {
+  defineBearerProviderExecutors,
+  defineProviderProxy,
+  providerUserAgent,
+  ProviderRequestError,
+} from "../provider-runtime.ts";
 
 const service = "cloudflare_mcp";
 const cloudflareMcpEndpoint = "https://mcp.cloudflare.com/mcp";
 const cloudflareMcpRequestTimeoutMs = 60_000;
-const expectedTools = ["docs", "execute", "search"];
+const supportedToolNames = new Set(["docs", "search", "execute"]);
 
 type CloudflareMcpToolResult = Awaited<ReturnType<Client["callTool"]>>;
 
-export const cloudflareMcpActionHandlers: Record<string, ProviderRuntimeHandler<BearerProviderContext>> = {
+export const cloudflareMcpActionHandlers: ProviderActionHandlers<
+  "cloudflare_mcp",
+  ProviderRuntimeHandler<BearerProviderContext>
+> = {
   docs(input: Record<string, unknown>, context: BearerProviderContext) {
     return callCloudflareMcpTool(context, "docs", input);
   },
@@ -32,6 +41,16 @@ export const executors: ProviderExecutors = defineBearerProviderExecutors(servic
   skipDnsValidation: true,
 });
 
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: cloudflareMcpEndpoint,
+  auth: { type: "bearer" },
+  skipDnsValidation: true,
+  customizeRequest({ headers }) {
+    headers.set("accept", "application/json, text/event-stream");
+  },
+});
+
 export const credentialValidators: CredentialValidators = {
   async apiKey(input, { fetcher, signal }) {
     return validateCloudflareMcpCredential(input.apiKey, fetcher, signal);
@@ -43,15 +62,9 @@ export const credentialValidators: CredentialValidators = {
 
 async function validateCloudflareMcpCredential(accessToken: string, fetcher: typeof fetch, signal?: AbortSignal) {
   const tools = await listCloudflareMcpTools({ accessToken, fetcher, signal });
-  const toolNames = tools.map((tool) => tool.name).sort();
-  const missingTools = expectedTools.filter((tool) => !toolNames.includes(tool));
-  if (missingTools.length > 0) {
-    throw new ProviderRequestError(
-      502,
-      `Cloudflare MCP did not advertise the expected tools: ${missingTools.join(", ")}`,
-    );
+  if (!tools.some((tool) => supportedToolNames.has(tool.name))) {
+    throw new ProviderRequestError(502, "Cloudflare MCP did not advertise any supported tools");
   }
-
   const tokenHash = createHash("sha256").update(accessToken).digest("hex").slice(0, 16);
   return {
     profile: {
@@ -60,7 +73,6 @@ async function validateCloudflareMcpCredential(accessToken: string, fetcher: typ
     },
     metadata: {
       mcpEndpoint: cloudflareMcpEndpoint,
-      mcpTools: toolNames,
     },
   };
 }

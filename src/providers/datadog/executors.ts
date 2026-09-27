@@ -6,12 +6,14 @@ import type {
   ProxyExecutionResult,
   ResolvedCredential,
 } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ProviderRuntimeHandler } from "../provider-runtime.ts";
 
 import { compactObject, optionalBoolean, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
   createProviderProxyUrl,
   defineProviderExecutors,
+  isAbortLikeError,
   normalizeProviderProxyHeaders,
   providerFetch,
   ProviderRequestError,
@@ -37,7 +39,7 @@ interface DatadogActionContext {
   signal?: AbortSignal;
 }
 
-export const datadogActionHandlers: Record<string, ProviderRuntimeHandler<DatadogActionContext>> = {
+export const datadogActionHandlers: ProviderActionHandlers<"datadog", ProviderRuntimeHandler<DatadogActionContext>> = {
   validate_api_key(_input, context) {
     if (context.authorization) {
       return datadogRequestJson(
@@ -391,7 +393,7 @@ async function datadogRequestJson(
     if (error instanceof ProviderRequestError) {
       throw error;
     }
-    if (isAbortError(error)) {
+    if (isAbortLikeError(error)) {
       throw new ProviderRequestError(504, "Datadog request timed out");
     }
     throw new ProviderRequestError(
@@ -557,8 +559,4 @@ function booleanQuery(value: unknown): string | undefined {
 function numberQuery(value: unknown): string | undefined {
   const numberValue = optionalNumber(value);
   return numberValue === undefined ? undefined : String(numberValue);
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }

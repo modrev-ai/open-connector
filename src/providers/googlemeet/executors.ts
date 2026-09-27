@@ -1,15 +1,24 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
-import { compactObject, optionalInteger, optionalRecord, optionalString, requiredRecord } from "../../core/cast.ts";
-import { googleJsonRequest } from "../google-runtime.ts";
 import {
-  defineOAuthProviderExecutors,
-  defineProviderProxy,
-  providerProxyEndpointPrefixes,
-  ProviderRequestError,
-} from "../provider-runtime.ts";
+  compactObject,
+  looseArray,
+  optionalInteger,
+  optionalRecord,
+  optionalString,
+  requiredRecord,
+} from "../../core/cast.ts";
+import {
+  defineGoogleProviderExecutors,
+  googleBearerProxyAuth,
+  googleServiceAccountValidator,
+} from "../googledrive/runtime-auth.ts";
+import { googleJsonRequest } from "../googledrive/runtime-request.ts";
+import { defineProviderProxy, providerProxyEndpointPrefixes, ProviderRequestError } from "../provider-runtime.ts";
 import { googleMeetApiBaseUrl, googleMeetApiOrigin, googleMeetUserInfoUrl } from "./constants.ts";
+import { googleMeetOAuthScopes } from "./scopes.ts";
 
 const service = "googlemeet";
 
@@ -129,7 +138,7 @@ const smartNotesListSpec: GoogleMeetListSpec = {
   responseField: "smartNotes",
 };
 
-export const googleMeetActionHandlers: Record<string, GoogleMeetActionHandler> = {
+export const googleMeetActionHandlers: ProviderActionHandlers<"googlemeet", GoogleMeetActionHandler> = {
   create_space: createSpace,
   get_space: getSpace,
   update_space: updateSpace,
@@ -150,12 +159,14 @@ export const googleMeetActionHandlers: Record<string, GoogleMeetActionHandler> =
   get_smart_note: getSmartNote,
 };
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, googleMeetActionHandlers);
+export const executors: ProviderExecutors = defineGoogleProviderExecutors(service, googleMeetActionHandlers, {
+  scopes: googleMeetOAuthScopes,
+});
 
 export const proxy: ProviderProxyExecutor = defineProviderProxy({
   service,
   baseUrl: googleMeetApiOrigin,
-  auth: { type: "oauth_bearer" },
+  auth: googleBearerProxyAuth(googleMeetOAuthScopes),
   allowedEndpoint: providerProxyEndpointPrefixes("/v2"),
 });
 
@@ -181,6 +192,7 @@ export const credentialValidators: CredentialValidators = {
       },
     };
   },
+  customCredential: googleServiceAccountValidator(service, googleMeetOAuthScopes),
 };
 
 async function createSpace(input: Record<string, unknown>, context: GoogleMeetRuntimeContext): Promise<unknown> {
@@ -305,7 +317,7 @@ async function listResources(
     },
   );
   return compactObject({
-    [spec.responseField]: arrayOrEmpty(payload[spec.responseField]),
+    [spec.responseField]: looseArray(payload[spec.responseField]),
     nextPageToken: optionalString(payload.nextPageToken) ?? null,
     totalSize: spec.supportsTotalSize ? optionalInteger(payload.totalSize) : undefined,
   });
@@ -378,8 +390,4 @@ function listQuery(input: Record<string, unknown>, supportsFilter = false): Reco
 function integerQuery(value: unknown): string | undefined {
   const resolved = optionalInteger(value);
   return resolved === undefined ? undefined : String(resolved);
-}
-
-function arrayOrEmpty(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
 }

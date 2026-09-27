@@ -1,21 +1,26 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
-import type { GitHubActionContext } from "./runtime-shared.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { GitHubActionContext, GitHubActionHandler } from "./runtime-shared.ts";
 
-import { defineProviderExecutors, requireBearerCredential } from "../provider-runtime.ts";
+import {
+  combineProviderActionHandlers,
+  defineProviderExecutors,
+  defineProviderProxy,
+  requireBearerCredential,
+} from "../provider-runtime.ts";
 import { activityActionHandlers } from "./runtime-activity.ts";
 import { issueActionHandlers } from "./runtime-issue.ts";
 import { pullRequestActionHandlers } from "./runtime-pull-request.ts";
 import { releaseActionHandlers } from "./runtime-release.ts";
 import { repositoryActionHandlers } from "./runtime-repository.ts";
 import { searchActionHandlers } from "./runtime-search.ts";
-import { githubRequestJson } from "./runtime-shared.ts";
+import { githubApiBaseUrl, githubApiVersion, githubDefaultAcceptHeader, githubRequestJson } from "./runtime-shared.ts";
 
 const service = "github";
 
 export const executors: ProviderExecutors = defineProviderExecutors<GitHubActionContext>({
   service,
-  handlers: Object.assign(
-    {},
+  handlers: combineProviderActionHandlers<"github", GitHubActionHandler>(
+    service,
     activityActionHandlers,
     repositoryActionHandlers,
     issueActionHandlers,
@@ -28,7 +33,20 @@ export const executors: ProviderExecutors = defineProviderExecutors<GitHubAction
     return {
       accessToken: credential.accessToken,
       fetcher,
+      transitFiles: context.transitFiles,
+      signal: context.signal,
     };
+  },
+});
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: githubApiBaseUrl,
+  auth: { type: "bearer" },
+  skipDnsValidation: true,
+  customizeRequest({ headers }) {
+    headers.set("accept", githubDefaultAcceptHeader);
+    headers.set("x-github-api-version", githubApiVersion);
   },
 });
 

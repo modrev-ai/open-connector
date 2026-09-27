@@ -1,4 +1,5 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
 import {
@@ -9,9 +10,15 @@ import {
   optionalRecord,
   optionalString,
 } from "../../core/cast.ts";
-import { googleJsonRequest } from "../google-runtime.ts";
+import {
+  defineGoogleProviderExecutors,
+  googleBearerProxyAuth,
+  googleServiceAccountValidator,
+} from "../googledrive/runtime-auth.ts";
+import { googleJsonRequest } from "../googledrive/runtime-request.ts";
 import { asObject } from "../googledrive/runtime-shared.ts";
-import { defineOAuthProviderExecutors, ProviderRequestError } from "../provider-runtime.ts";
+import { defineProviderProxy, ProviderRequestError } from "../provider-runtime.ts";
+import { googleChatOAuthScopes } from "./scopes.ts";
 
 export const googleChatApiBaseUrl = "https://chat.googleapis.com/v1";
 
@@ -33,14 +40,23 @@ interface ListMessagesPayload {
   nextPageToken?: string | null;
 }
 
-export const googleChatActionHandlers: Record<string, GoogleChatActionHandler> = {
+export const googleChatActionHandlers: ProviderActionHandlers<"googlechat", GoogleChatActionHandler> = {
   list_spaces: listSpaces,
   get_space: getSpace,
   list_messages: listMessages,
   get_message: getMessage,
 };
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, googleChatActionHandlers);
+export const executors: ProviderExecutors = defineGoogleProviderExecutors(service, googleChatActionHandlers, {
+  scopes: googleChatOAuthScopes,
+});
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: googleChatApiBaseUrl,
+  auth: googleBearerProxyAuth(googleChatOAuthScopes),
+  skipDnsValidation: true,
+});
 
 export const credentialValidators: CredentialValidators = {
   async oauth2(input, { fetcher, signal }) {
@@ -64,6 +80,7 @@ export const credentialValidators: CredentialValidators = {
       },
     };
   },
+  customCredential: googleServiceAccountValidator(service, googleChatOAuthScopes),
 };
 
 async function listSpaces(input: Record<string, unknown>, context: GoogleChatRuntimeContext) {

@@ -1,4 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { Client } from "@modelcontextprotocol/client";
 
 import { UnauthorizedError } from "@modelcontextprotocol/client";
@@ -8,7 +9,12 @@ import { createHash } from "node:crypto";
 import { requiredString } from "../../core/cast.ts";
 import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import { withMcpClient } from "../mcp-client.ts";
-import { providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
+import {
+  mapProviderActionNames,
+  providerInputError,
+  providerUserAgent,
+  ProviderRequestError,
+} from "../provider-runtime.ts";
 import { jumpServerMcpToolNames } from "./actions.ts";
 
 type JumpServerActionHandler = (input: Record<string, unknown>, context: JumpServerMcpContext) => Promise<unknown>;
@@ -23,11 +29,14 @@ export interface JumpServerMcpContext {
 
 const requestTimeoutMs = 60_000;
 
-export const jumpServerActionHandlers: Record<string, JumpServerActionHandler> = {};
-for (const toolName of jumpServerMcpToolNames) {
-  jumpServerActionHandlers[toolName] = (input: Record<string, unknown>, context: JumpServerMcpContext) =>
-    callJumpServerMcpTool(context, toolName, input);
-}
+export const jumpServerActionHandlers: ProviderActionHandlers<"jumpserver", JumpServerActionHandler> =
+  mapProviderActionNames(
+    "jumpserver",
+    jumpServerMcpToolNames,
+    (toolName): JumpServerActionHandler =>
+      (input, context) =>
+        callJumpServerMcpTool(context, toolName, input),
+  );
 
 export function createJumpServerMcpContext(
   values: Record<string, string>,
@@ -36,7 +45,7 @@ export function createJumpServerMcpContext(
 ): JumpServerMcpContext {
   return {
     endpoint: normalizeJumpServerMcpEndpoint(values.mcpEndpoint),
-    token: requiredString(values.token, "token", credentialError),
+    token: requiredString(values.token, "token", providerInputError),
     fetcher,
     signal,
   };
@@ -51,7 +60,7 @@ export async function validateJumpServerCredential(
   const discoveredTools = await listJumpServerMcpTools(context);
   const availableActions = jumpServerMcpToolNames.filter((toolName) => discoveredTools.includes(toolName));
   if (availableActions.length === 0) {
-    throw credentialError("JumpServer MCP endpoint did not expose any supported tools");
+    throw providerInputError("JumpServer MCP endpoint did not expose any supported tools");
   }
   const endpointHash = createHash("sha256").update(context.endpoint.origin).digest("hex").slice(0, 16);
   return {
@@ -79,17 +88,17 @@ export function normalizeJumpServerMcpEndpoint(
   value: unknown,
   allowPrivateNetwork: boolean = isPrivateNetworkAccessAllowed(),
 ): URL {
-  const raw = requiredString(value, "mcpEndpoint", credentialError);
+  const raw = requiredString(value, "mcpEndpoint", providerInputError);
   const url = assertPublicHttpUrl(raw, {
     fieldName: "mcpEndpoint",
-    createError: credentialError,
+    createError: providerInputError,
     allowPrivateNetwork,
   });
   if (url.username || url.password) {
-    throw credentialError("mcpEndpoint must not include credentials");
+    throw providerInputError("mcpEndpoint must not include credentials");
   }
   if (url.protocol === "http:" && !allowPrivateNetwork) {
-    throw credentialError("http mcpEndpoint URLs require private-network access to be enabled");
+    throw providerInputError("http mcpEndpoint URLs require private-network access to be enabled");
   }
 
   url.hash = "";
@@ -199,10 +208,6 @@ function mapJumpServerMcpError(error: unknown): ProviderRequestError {
     error instanceof Error ? `JumpServer MCP request failed: ${error.message}` : "JumpServer MCP request failed",
     error,
   );
-}
-
-function credentialError(message: string): ProviderRequestError {
-  return new ProviderRequestError(400, message);
 }
 
 function isAbortError(error: unknown): boolean {

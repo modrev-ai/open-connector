@@ -1,12 +1,18 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
-import type { ApiKeyProviderContext } from "../provider-runtime.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ApiKeyProviderContext, ProviderActionHandlers, ProviderRuntimeHandler } from "../provider-runtime.ts";
 
-import { defineApiKeyProviderExecutors, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
+import {
+  basicAuthorizationHeader,
+  defineApiKeyProviderExecutors,
+  defineProviderProxy,
+  ProviderRequestError,
+  providerUserAgent,
+} from "../provider-runtime.ts";
 
 const service = "dealroom";
 const baseUrl = "https://api.dealroom.co/api/v1/";
 
-export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, {
+const handlers: ProviderActionHandlers<"dealroom", ProviderRuntimeHandler<ApiKeyProviderContext>> = {
   search_companies(input, context) {
     return search("companies", input, context);
   },
@@ -19,6 +25,18 @@ export const executors: ProviderExecutors = defineApiKeyProviderExecutors(servic
     if (limit + offset > 100)
       throw new ProviderRequestError(400, "dealroom transactions limit plus offset cannot exceed 100");
     return search("transactions", input, context);
+  },
+};
+
+export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, handlers);
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl,
+  auth: { type: "api_key_basic", suffix: ":" },
+  skipDnsValidation: true,
+  customizeRequest({ headers }) {
+    if (!headers.has("accept")) headers.set("accept", "application/json");
   },
 });
 
@@ -63,7 +81,7 @@ async function request(path: string, body: Record<string, unknown>, context: Api
   const response = await context.fetcher(new URL(path, baseUrl), {
     method: "POST",
     headers: {
-      authorization: `Basic ${btoa(`${context.apiKey}:`)}`,
+      authorization: basicAuthorizationHeader(`${context.apiKey}:`),
       accept: "application/json",
       "content-type": "application/json",
       "user-agent": providerUserAgent,

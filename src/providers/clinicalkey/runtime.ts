@@ -1,10 +1,15 @@
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
+
 import { optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
-import { createProviderTimeout, providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
+import {
+  providerInputError,
+  providerUserAgent,
+  ProviderRequestError,
+  runProviderRequest,
+} from "../provider-runtime.ts";
 
-const clinicalKeyApiBaseUrl = "https://api.elsevier.com/sushi/r51";
-const clinicalKeyPlatformCode = "ck";
-
-const clinicalKeyRequestTimeoutMs = 30_000;
+export const clinicalKeyApiBaseUrl = "https://api.elsevier.com/sushi/r51";
+export const clinicalKeyPlatformCode = "ck";
 
 type ClinicalKeyRequestPhase = "validate" | "execute";
 type ClinicalKeyCredentials = {
@@ -18,7 +23,7 @@ interface ClinicalKeyActionContext {
 }
 type ClinicalKeyActionHandler = (input: Record<string, unknown>, context: ClinicalKeyActionContext) => Promise<unknown>;
 
-export const clinicalKeyActionHandlers: Record<string, ClinicalKeyActionHandler> = {
+export const clinicalKeyActionHandlers: ProviderActionHandlers<"clinicalkey", ClinicalKeyActionHandler> = {
   async get_service_status(_input, context) {
     return {
       status: requireObjectPayload(
@@ -135,38 +140,21 @@ async function requestClinicalKeyJson(input: {
   fetcher: typeof fetch;
   phase: ClinicalKeyRequestPhase;
 }) {
-  const timeoutHandle = createProviderTimeout(undefined, clinicalKeyRequestTimeoutMs);
-
-  try {
+  return runProviderRequest({ label: "ClinicalKey" }, async (signal) => {
     const response = await input.fetcher(buildClinicalKeyUrl(input.path, input.query, input.credentials), {
       method: "GET",
       headers: {
         accept: "application/json",
         "user-agent": providerUserAgent,
       },
-      signal: timeoutHandle.signal,
+      signal,
     });
     const payload = await readClinicalKeyPayload(response);
     if (!response.ok) {
       throw createClinicalKeyError(response.status, payload, input.phase);
     }
     return payload;
-  } catch (error) {
-    if (error instanceof ProviderRequestError) {
-      throw error;
-    }
-
-    if (timeoutHandle.didTimeout() || isAbortLikeError(error)) {
-      throw new ProviderRequestError(504, "ClinicalKey request timed out");
-    }
-
-    throw new ProviderRequestError(
-      502,
-      error instanceof Error ? `ClinicalKey request failed: ${error.message}` : "ClinicalKey request failed",
-    );
-  } finally {
-    timeoutHandle.cleanup();
-  }
+  });
 }
 
 function buildClinicalKeyUrl(
@@ -212,7 +200,7 @@ function createClinicalKeyError(status: number, payload: unknown, phase: Clinica
   }
 
   if (status === 401 || status === 403) {
-    return new ProviderRequestError(409, message);
+    return new ProviderRequestError(401, message);
   }
 
   if (status >= 400 && status < 500) {
@@ -297,12 +285,4 @@ function readRequiredString(value: unknown, fieldName: string) {
 
 function readOptionalString(value: unknown) {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
-}
-
-function isAbortLikeError(error: unknown) {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
-function providerInputError(message: string): ProviderRequestError {
-  return new ProviderRequestError(400, message);
 }

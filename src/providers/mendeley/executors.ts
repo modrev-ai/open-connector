@@ -1,7 +1,14 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext, ProviderRuntimeHandler } from "../provider-runtime.ts";
 
-import { defineOAuthProviderExecutors, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
+import {
+  defineOAuthProviderExecutors,
+  defineProviderProxy,
+  mapProviderActionHandlers,
+  ProviderRequestError,
+  providerUserAgent,
+} from "../provider-runtime.ts";
 import { mendeleyActions } from "./actions.ts";
 
 const service = "mendeley";
@@ -19,12 +26,25 @@ interface MendeleyTokenInput {
   grantType: "authorization_code" | "refresh_token";
 }
 
-const handlers: Record<string, ProviderRuntimeHandler<OAuthProviderContext>> = {};
-for (const action of mendeleyActions) {
-  handlers[action.name] = (input, context) =>
-    executeMendeleyAction(action.name, input, context.accessToken, context.fetcher);
-}
+const handlers: ProviderActionHandlers<
+  "mendeley",
+  ProviderRuntimeHandler<OAuthProviderContext>
+> = mapProviderActionHandlers(
+  service,
+  mendeleyActions,
+  (_action, name) => (input, context) => executeMendeleyAction(name, input, context.accessToken, context.fetcher),
+);
 export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, handlers);
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: mendeleyApiBaseUrl,
+  auth: { type: "oauth_bearer" },
+  skipDnsValidation: true,
+  customizeRequest({ headers }) {
+    headers.set("accept", "application/json");
+  },
+});
 
 export const credentialValidators: CredentialValidators = {
   async oauth2(input, { fetcher }) {

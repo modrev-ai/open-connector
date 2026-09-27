@@ -8,13 +8,13 @@ import type {
   ProviderDefinition,
   ProviderProxyExecutor,
   ResolvedCredential,
+  TransitFileUpload,
 } from "../core/types.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../oauth/oauth-client-config-service.ts";
 import type { IOAuthStateStore, OAuthAuthorizationState } from "../oauth/oauth-flow-service.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { RuntimeActionHttpResult } from "./api/runtime-api.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
-import type { TransitFileUpload } from "./files/transit-file-store.ts";
 import type { Logger } from "./logger.ts";
 import type { ISecretCodec } from "./secrets/secret-codec-core.ts";
 import type {
@@ -46,6 +46,7 @@ import { TransitFileService } from "./files/transit-files.ts";
 import { AesGcmSecretCodec } from "./secrets/secret-codec.ts";
 import { decodeRunLogCursor, encodeRunLogCursor } from "./storage/runtime-store.ts";
 import { RuntimeTokenService } from "./storage/runtime-token-service.ts";
+import { SqliteRuntimeDatabase } from "./storage/sqlite-runtime-store.ts";
 
 const apiKeyProvider: ProviderDefinition = {
   service: "example",
@@ -55,6 +56,11 @@ const apiKeyProvider: ProviderDefinition = {
   auth: [{ type: "api_key" }],
   actions: [],
 };
+
+const requestDatabases: SqliteRuntimeDatabase[] = [];
+afterEach(() => {
+  for (const database of requestDatabases.splice(0)) database.close();
+});
 
 const oauthProvider: ProviderDefinition = {
   service: "oauth_example",
@@ -88,6 +94,7 @@ const echoAction: ActionDefinition = {
   service: "example",
   name: "echo",
   description: "Echo input.",
+  operationType: "write",
   requiredScopes: [],
   providerPermissions: [],
   inputSchema: { type: "object" },
@@ -359,6 +366,7 @@ describe("ConnectServer", () => {
             service: "example",
             name: "echo",
             description: "Echo the input.",
+            operationType: "read",
             requiredScopes: [],
             providerPermissions: [],
             inputSchema: { type: "object", properties: { message: { type: "string" } } },
@@ -380,6 +388,7 @@ describe("ConnectServer", () => {
     expect(listedAction).not.toHaveProperty("outputSchema");
     expect(listedAction).toHaveProperty("id");
     expect(listedAction).toHaveProperty("execution");
+    expect(listed[0]).toMatchObject({ scenario: "developer" });
 
     const actionResponse = await app.request(`/api/actions/${String(listedAction?.id)}`);
     await expect(actionResponse.json()).resolves.toHaveProperty("inputSchema");
@@ -484,11 +493,51 @@ describe("ConnectServer", () => {
     });
     expect(action.status).toBe(400);
     await expect(action.json()).resolves.toEqual({
-      error: {
-        code: "invalid_json",
-        message: "Request body must be valid JSON.",
-      },
+      success: false,
+      message: "Request body must be valid JSON.",
+      data: null,
+      errorCode: "invalid_json",
+      meta: {},
     });
+
+    const proxy = await app.request("/v1/proxy/example", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    });
+    expect(proxy.status).toBe(400);
+    await expect(proxy.json()).resolves.toEqual({
+      success: false,
+      message: "Request body must be valid JSON.",
+      data: null,
+      errorCode: "invalid_json",
+      meta: { service: "example" },
+    });
+  });
+
+  it("accepts case-insensitive JSON media types when disconnecting a named connection", async () => {
+    const app = createTestServer([apiKeyProvider]).createApp();
+    for (const [connectionName, apiKey] of [
+      ["default", "default-key"],
+      ["work", "work-key"],
+    ]) {
+      await app.request("/api/connections/example", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ authType: "api_key", connectionName, values: { apiKey } }),
+      });
+    }
+
+    const response = await app.request("/api/connections/example", {
+      method: "DELETE",
+      headers: { "content-type": "Application/JSON; Charset=UTF-8" },
+      body: JSON.stringify({ connectionName: "work" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ connectionName: "work", configured: false });
+    const connections = (await (await app.request("/api/connections")).json()) as Array<{ connectionName: string }>;
+    expect(connections.map((connection) => connection.connectionName)).toEqual(["default"]);
   });
 
   it("rejects JSON request bodies that are not objects", async () => {
@@ -508,10 +557,11 @@ describe("ConnectServer", () => {
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({
-        error: {
-          code: "invalid_json",
-          message: "Request body must be a JSON object.",
-        },
+        success: false,
+        message: "Request body must be a JSON object.",
+        data: null,
+        errorCode: "invalid_json",
+        meta: {},
       });
     }
   });
@@ -923,6 +973,106 @@ describe("ConnectServer", () => {
     expect(logOutput).not.toContain("example-key");
     expect(logOutput).not.toContain("secret-message");
     expect(logOutput).not.toContain("secret-token");
+  });
+
+  it("propagates HTTP request cancellation to action execution", async () => {
+    const controller = new AbortController();
+    let executionStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      executionStarted = resolve;
+    });
+    let executionSignal: AbortSignal | undefined;
+    const providerLoader = new ActionProviderLoader(async (_input, context) => {
+      executionSignal = context.signal;
+      executionStarted?.();
+      await new Promise<void>((_resolve, reject) => {
+        if (!context.signal) {
+          reject(new Error("request signal missing"));
+          return;
+        }
+        context.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+      });
+      return { ok: true, output: {} };
+    });
+    const runs = new MemoryRunLogStore();
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      providerLoader,
+      runs,
+    }).createApp();
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
+    });
+    const request = new Request("http://localhost/v1/actions/example.echo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+      signal: controller.signal,
+    });
+
+    const responsePromise = app.fetch(request);
+    await started;
+    controller.abort();
+    const response = await responsePromise;
+
+    expect(executionSignal?.aborted).toBe(true);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      errorCode: "execution_cancelled",
+    });
+    await expect(runs.list()).resolves.toMatchObject({
+      items: [expect.objectContaining({ caller: "http", ok: false, errorCode: "execution_cancelled" })],
+    });
+  });
+
+  it("propagates HTTP request cancellation to credential validation", async () => {
+    const controller = new AbortController();
+    let validationStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      validationStarted = resolve;
+    });
+    let validationSignal: AbortSignal | undefined;
+    const { entries, logger } = createTestLogger();
+    const providerLoader = new HangingCredentialValidatorLoader((signal) => {
+      validationSignal = signal;
+      validationStarted?.();
+    });
+    const app = createTestServer([apiKeyProvider], { logger, providerLoader }).createApp();
+    const request = new Request("http://localhost/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
+      signal: controller.signal,
+    });
+
+    const responsePromise = app.fetch(request);
+    await started;
+    controller.abort();
+    const response = await responsePromise;
+
+    expect(validationSignal?.aborted).toBe(true);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "connection_cancelled",
+        message: "Credential validation was cancelled.",
+      },
+    });
+    expect(entries).toContainEqual({
+      level: "info",
+      fields: expect.objectContaining({ errorCode: "connection_cancelled" }),
+      message: "connection cancelled",
+    });
+    expect(entries).not.toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "connection failed",
+      }),
+    );
+    const connections = await app.request("/api/connections");
+    await expect(connections.json()).resolves.toEqual([]);
   });
 
   it("logs failed action runs with error codes", async () => {
@@ -1437,6 +1587,7 @@ describe("ConnectServer", () => {
       allowedActions: ["example.*"],
       blockedActions: ["example.delete"],
       allowedProxies: ["example"],
+      allowedConnections: [],
     });
     expect(JSON.stringify(createdBody.record)).not.toContain(createdBody.token);
 
@@ -1449,19 +1600,26 @@ describe("ConnectServer", () => {
         allowedActions: ["example.*"],
         blockedActions: ["example.delete"],
         allowedProxies: ["example"],
+        allowedConnections: [],
       },
     ]);
 
     const updated = await app.request(`/api/runtime-tokens/${createdBody.record.id}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ allowedActions: ["example.echo"], blockedActions: [], allowedProxies: [] }),
+      body: JSON.stringify({
+        allowedActions: ["example.echo"],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      }),
     });
     expect(updated.status).toBe(200);
     await expect(updated.json()).resolves.toMatchObject({
       allowedActions: ["example.echo"],
       blockedActions: [],
       allowedProxies: [],
+      allowedConnections: [],
     });
 
     const unauthorized = await app.request("/v1/actions");
@@ -1656,6 +1814,238 @@ describe("ConnectServer", () => {
         },
       ],
     });
+  });
+
+  it("enforces stored token connection scope on HTTP actions, proxies, and runtime discovery", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      runtimeTokens,
+      providerLoader: new ProxyProviderLoader(),
+    }).createApp();
+    const defaultConnectionResponse = await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "default-key" } }),
+    });
+    const defaultConnection = (await defaultConnectionResponse.json()) as { id: string };
+    const workConnectionResponse = await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        authType: "api_key",
+        connectionName: "work",
+        values: { apiKey: "work-key" },
+      }),
+    });
+    const workConnection = (await workConnectionResponse.json()) as { id: string };
+    const created = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Work only",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: ["example"],
+        allowedConnections: [workConnection.id],
+      }),
+    });
+    const token = (await created.json()) as { token: string };
+    const authorize = { authorization: `Bearer ${token.token}` };
+
+    const omitted = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: { ...authorize, "content-type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+    });
+    const hidden = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: { ...authorize, "content-type": "application/json" },
+      body: JSON.stringify({ input: {}, connectionName: "default" }),
+    });
+    const ungrantedMissing = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: { ...authorize, "content-type": "application/json" },
+      body: JSON.stringify({ input: {}, connectionName: "ghost" }),
+    });
+    expect(omitted.status).toBe(403);
+    expect(hidden.status).toBe(403);
+    expect(ungrantedMissing.status).toBe(403);
+    await expect(omitted.json()).resolves.toMatchObject({ errorCode: "connection_not_allowed" });
+    await expect(hidden.json()).resolves.toMatchObject({ errorCode: "connection_not_allowed" });
+    await expect(ungrantedMissing.json()).resolves.toMatchObject({ errorCode: "connection_not_allowed" });
+
+    const allowed = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: {
+        ...authorize,
+        "content-type": "application/json",
+        "x-oo-connector-alias": "work",
+      },
+      body: JSON.stringify({ input: { message: "hello" } }),
+    });
+    expect(allowed.status).toBe(200);
+
+    const omittedProxy = await app.request("/v1/proxy/example", {
+      method: "POST",
+      headers: { ...authorize, "content-type": "application/json" },
+      body: JSON.stringify({ endpoint: "/items", method: "GET" }),
+    });
+    const allowedProxy = await app.request("/v1/proxy/example", {
+      method: "POST",
+      headers: {
+        ...authorize,
+        "content-type": "application/json",
+        "x-oo-connector-alias": "work",
+      },
+      body: JSON.stringify({ endpoint: "/items", method: "GET" }),
+    });
+    expect(omittedProxy.status).toBe(403);
+    await expect(omittedProxy.json()).resolves.toMatchObject({ errorCode: "connection_not_allowed" });
+    expect(allowedProxy.status).toBe(200);
+
+    const apps = await app.request("/v1/apps", { headers: authorize });
+    expect(apps.status).toBe(200);
+    const appsBody = (await apps.json()) as { data: Array<{ alias: string }> };
+    expect(appsBody.data.map((app) => app.alias)).toEqual(["work"]);
+
+    const byService = await app.request("/v1/apps/services/example", { headers: authorize });
+    expect(byService.status).toBe(200);
+    const byServiceBody = (await byService.json()) as { data: Array<{ alias: string }> };
+    expect(byServiceBody.data.map((app) => app.alias)).toEqual(["work"]);
+
+    const authenticated = await app.request("/v1/apps/authenticated?service=example", { headers: authorize });
+    expect(authenticated.status).toBe(200);
+    await expect(authenticated.json()).resolves.toMatchObject({ data: ["example"] });
+
+    const grantedMissingCreated = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Work and ghost",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [workConnection.id, "deleted-connection-id"],
+      }),
+    });
+    const grantedMissingToken = (await grantedMissingCreated.json()) as {
+      token: string;
+      record: { allowedConnections: string[] };
+    };
+    expect(grantedMissingToken.record.allowedConnections).toEqual([workConnection.id, "deleted-connection-id"]);
+    const grantedMissing = await app.request("/v1/actions/example.echo", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${grantedMissingToken.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ input: {}, connectionName: "ghost" }),
+    });
+    expect(grantedMissing.status).toBe(403);
+    await expect(grantedMissing.json()).resolves.toMatchObject({ errorCode: "connection_not_allowed" });
+
+    const adminConnections = await app.request("/api/connections");
+    expect(adminConnections.status).toBe(200);
+    const listed = (await adminConnections.json()) as Array<{ id: string; connectionName: string }>;
+    expect(listed.map((connection) => connection.connectionName).sort()).toEqual(["default", "work"]);
+    expect(listed.map((connection) => connection.id).sort()).toEqual([defaultConnection.id, workConnection.id].sort());
+
+    const guide = await app.request("/api/actions/example.echo/agent.md");
+    expect(guide.status).toBe(200);
+    expect(await guide.text()).toContain("## Current Connection");
+  });
+
+  it("preserves admin, bootstrap, JWT, and unrestricted token connection access", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const verifyRuntimeJwt = vi.fn(async (token: string) => token === "jwt-access-token");
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      auth: {
+        adminToken: "local-token",
+        runtimeToken: "bootstrap-token",
+        verifyRuntimeJwt,
+      },
+      runtimeTokens,
+      providerLoader: new EchoProviderLoader(),
+    }).createApp();
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer local-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "default-key" } }),
+    });
+    const restricted = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer local-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "Work only",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: ["ungranted-connection-id"],
+      }),
+    });
+    const unrestricted = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer local-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "Unrestricted",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      }),
+    });
+    const restrictedToken = (await restricted.json()) as { token: string };
+    const unrestrictedToken = (await unrestricted.json()) as { token: string };
+    const runDefault = async (authorization: string): Promise<number> => {
+      const response = await app.request("/v1/actions/example.echo", {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({ input: {} }),
+      });
+      return response.status;
+    };
+
+    expect(await runDefault(`Bearer ${restrictedToken.token}`)).toBe(403);
+    expect(await runDefault("Bearer local-token")).toBe(200);
+    expect(await runDefault("Bearer bootstrap-token")).toBe(200);
+    expect(await runDefault("Bearer jwt-access-token")).toBe(200);
+    expect(await runDefault(`Bearer ${unrestrictedToken.token}`)).toBe(200);
+  });
+
+  it("rejects token policy updates that omit allowedConnections", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const app = createTestServer([apiKeyProvider], { runtimeTokens }).createApp();
+    const created = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Work only",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: ["connection-id"],
+      }),
+    });
+    const token = (await created.json()) as { record: { id: string } };
+    const omitted = await app.request(`/api/runtime-tokens/${token.record.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowedActions: [], blockedActions: [], allowedProxies: [] }),
+    });
+    expect(omitted.status).toBe(400);
+    await expect(omitted.json()).resolves.toMatchObject({ error: { code: "invalid_input" } });
+    const listed = await app.request("/api/runtime-tokens");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toMatchObject([{ allowedConnections: ["connection-id"] }]);
   });
 
   it("returns an idempotency conflict when different stored tokens reuse one key", async () => {
@@ -2050,6 +2440,20 @@ describe("ConnectServer", () => {
     expect(markdown).toContain("`messages:read`");
   });
 
+  it("renders agent.md request examples against the configured public origin", async () => {
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      publicOrigin: "https://connector.example.com",
+    }).createApp();
+
+    const response = await app.request("/api/actions/example.echo/agent.md");
+
+    expect(response.status).toBe(200);
+    const markdown = await response.text();
+    expect(markdown).toContain("curl -s https://connector.example.com/v1/actions/example.echo \\");
+    expect(markdown).toContain('fetch("https://connector.example.com/v1/actions/example.echo"');
+    expect(markdown).not.toContain("localhost");
+  });
+
   it("returns connection errors for action agent.md instead of 500", async () => {
     const app = createTestServer([
       {
@@ -2212,6 +2616,7 @@ describe("ConnectServer", () => {
         {
           id: "example.echo",
           service: "example",
+          operationType: "write",
           followUpActions: [{ actionId: "example.follow_up" }],
         },
         {
@@ -2252,6 +2657,7 @@ describe("ConnectServer", () => {
         service: string;
         name: string;
         description: string;
+        operationType: ActionDefinition["operationType"];
         authenticated: boolean;
         inputSchema: Record<string, unknown>;
         outputSchema: Record<string, unknown>;
@@ -2263,6 +2669,7 @@ describe("ConnectServer", () => {
       service: "example",
       name: "echo",
       description: "Echo input.",
+      operationType: "write",
       authenticated: true,
       inputSchema: { type: "object" },
       outputSchema: { type: "object" },
@@ -2277,6 +2684,7 @@ describe("ConnectServer", () => {
       data: {
         id: "example.echo",
         service: "example",
+        operationType: "write",
         inputSchema: { type: "object" },
         outputSchema: { type: "object" },
         followUpActions: [{ actionId: "example.follow_up" }],
@@ -2802,7 +3210,7 @@ describe("ConnectServer", () => {
     expect(unknown.status).toBe(404);
     await expect(unknown.json()).resolves.toMatchObject({
       success: false,
-      errorCode: "invalid_input",
+      errorCode: "unknown_action",
       meta: { actionId: "example.missing" },
     });
 
@@ -2810,7 +3218,7 @@ describe("ConnectServer", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-oomol-connector-alias": "work",
+        "x-oo-connector-alias": "work",
       },
       body: JSON.stringify({ input: {} }),
     });
@@ -2847,7 +3255,7 @@ describe("ConnectServer", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-oomol-connector-alias": "work",
+        "x-oo-connector-alias": "work",
       },
       body: JSON.stringify({
         endpoint: "/items",
@@ -2875,6 +3283,89 @@ describe("ConnectServer", () => {
         },
       },
       meta: {},
+    });
+  });
+
+  it("propagates HTTP request cancellation to provider proxy execution", async () => {
+    const controller = new AbortController();
+    let proxyStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      proxyStarted = resolve;
+    });
+    let proxySignal: AbortSignal | undefined;
+    const app = createTestServer([apiKeyProvider], {
+      providerLoader: new ProxyProviderLoader(async (_input, context) => {
+        proxySignal = context.signal;
+        proxyStarted?.();
+        await new Promise<void>((_resolve, reject) => {
+          if (!context.signal) {
+            reject(new Error("proxy request signal missing"));
+            return;
+          }
+          context.signal.addEventListener("abort", () => reject(new Error("proxy request aborted")), { once: true });
+        });
+        return { ok: true, response: { status: 200, headers: {}, data: {} } };
+      }),
+    }).createApp();
+
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
+    });
+
+    const responsePromise = app.fetch(
+      new Request("http://localhost/v1/proxy/example", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint: "/items", method: "GET" }),
+        signal: controller.signal,
+      }),
+    );
+    await started;
+    controller.abort();
+    const response = await responsePromise;
+
+    expect(proxySignal?.aborted).toBe(true);
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      errorCode: "internal_error",
+    });
+  });
+
+  it("reports a provider proxy timeout as HTTP 500 with data.status 504", async () => {
+    const app = createTestServer([apiKeyProvider], {
+      providerLoader: new ProxyProviderLoader(async () => ({
+        // The failure defineProviderProxy returns once its per-request deadline fires.
+        ok: false,
+        error: {
+          code: "provider_error",
+          message: "example request timed out",
+          details: { status: 504, details: undefined },
+        },
+      })),
+    }).createApp();
+
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
+    });
+
+    const response = await app.request("/v1/proxy/example", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ endpoint: "/items", method: "GET" }),
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      message: "example request timed out",
+      data: { status: 504 },
+      errorCode: "provider_error",
+      meta: { service: "example" },
     });
   });
 
@@ -3187,6 +3678,7 @@ interface TestAuthOptions {
 
 interface CreateTestServerOptions {
   auth?: TestAuthOptions;
+  publicOrigin?: string;
   actionPolicy?: ActionPolicyService;
   actionSearch?: ActionSearchIndexProvider;
   providerLoader?: IProviderLoader;
@@ -3203,10 +3695,12 @@ interface CreateTestServerOptions {
 }
 
 function createTestServer(providers: ProviderDefinition[], options: CreateTestServerOptions = {}): ConnectServer {
+  const requestDatabase = new SqliteRuntimeDatabase(":memory:");
+  requestDatabases.push(requestDatabase);
   const catalog = createCatalogStore(providers, {
     executableActionIds: ["example.echo"],
   });
-  const providerLoader = options.providerLoader ?? new EmptyProviderLoader();
+  const providerLoader: IProviderLoader = options.providerLoader ?? new EmptyProviderLoader();
   const idempotency = options.idempotency ?? new MemoryIdempotencyStore();
   const runtimeTokens = options.runtimeTokens ?? new RuntimeTokenService(new MemoryRuntimeTokenStore());
   const runs = options.runs ?? new MemoryRunLogStore();
@@ -3240,20 +3734,22 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
     connections,
     runs,
     transitFiles,
-    actionPolicy: options.actionPolicy,
     logger: options.logger,
   });
   const staticRoot = typeof options.staticRoot === "string" ? options.staticRoot : undefined;
 
   return new ConnectServer({
     catalog,
+    publicOrigin: options.publicOrigin ?? "http://localhost:3000",
     providerLoader,
     connections,
     oauthClientConfigs: clientConfigs,
     oauthFlow: new OAuthFlowService({
       clientConfigs,
       connections,
+      providerLoader,
       states: new MemoryOAuthStateStore(),
+      requests: requestDatabase.connectionRequestStore,
       secretCodec: options.secretCodec,
       isCustomClientConfigAllowed,
     }),
@@ -3263,7 +3759,7 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
     uploadTransitFile: options.uploadTransitFile,
     runtimeTokens,
     runtimePolicyStore: options.runtimePolicyStore ?? new MemoryRuntimePolicyStore(),
-    registerStaticRoutes: staticRoot ? (app) => registerStaticRoutes(app, staticRoot) : undefined,
+    registerStaticRoutes: staticRoot ? (app) => registerStaticRoutes(app, { root: staticRoot }) : undefined,
     auth: {
       ...options.auth,
       hasRuntimeTokens: async () => (await runtimeTokens.listTokens()).length > 0,
@@ -3332,6 +3828,42 @@ class EmptyProviderLoader implements IProviderLoader {
 
   async loadCredentialValidators(): Promise<undefined> {
     return undefined;
+  }
+}
+
+class HangingCredentialValidatorLoader implements IProviderLoader {
+  private readonly onStarted: (signal: AbortSignal | undefined) => void;
+
+  constructor(onStarted: (signal: AbortSignal | undefined) => void) {
+    this.onStarted = onStarted;
+  }
+
+  async loadActionExecutor(): Promise<never> {
+    throw new Error("No actions are available in this test.");
+  }
+
+  async loadProxyExecutor(): Promise<ProviderProxyExecutor | undefined> {
+    return undefined;
+  }
+
+  async loadCredentialValidators(): Promise<{
+    apiKey(
+      _input: { apiKey: string; values: Record<string, string> },
+      options: { signal?: AbortSignal },
+    ): Promise<void>;
+  }> {
+    return {
+      apiKey: async (_input, options) => {
+        this.onStarted(options.signal);
+        await new Promise<void>((_resolve, reject) => {
+          if (!options.signal) {
+            reject(new Error("request signal missing"));
+            return;
+          }
+          options.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+        });
+      },
+    };
   }
 }
 
@@ -3490,6 +4022,12 @@ class MemoryOAuthClientConfigStore implements IOAuthClientConfigStore {
 class MemoryOAuthStateStore implements IOAuthStateStore {
   private readonly states = new Map<string, OAuthAuthorizationState>();
 
+  async deleteCreatedBefore(cutoff: string): Promise<void> {
+    for (const [state, value] of this.states) {
+      if (value.createdAt < cutoff) this.states.delete(state);
+    }
+  }
+
   async set(state: OAuthAuthorizationState): Promise<void> {
     this.states.set(state.state, state);
   }
@@ -3525,7 +4063,7 @@ class MemoryRuntimeTokenStore implements IRuntimeTokenStore {
     if (!token) {
       return undefined;
     }
-    const updated = { ...token, ...policy };
+    const updated = { ...token, ...policy, allowedConnections: policy.allowedConnections ?? [] };
     this.tokens.set(id, updated);
     return updated;
   }

@@ -17,7 +17,7 @@ const npmNeedsShell = process.platform === "win32";
 runChecked(process.execPath, ["scripts/ensure-generated.ts"]);
 
 const processes: DevProcess[] = [
-  startProcess("api", process.execPath, ["src/server/index.ts"]),
+  startProcess("api", process.execPath, ["--watch", "--watch-preserve-output", "src/server/index.ts"]),
   startProcess("web", npmCommand, ["run", "dev", "--workspace", "web", "--", "--clearScreen", "false"], {
     shell: npmNeedsShell,
   }),

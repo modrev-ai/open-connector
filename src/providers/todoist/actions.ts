@@ -231,30 +231,10 @@ const listLabelsInput = s.object(
   { optional: ["cursor", "limit"] },
 );
 
-export type TodoistActionName =
-  | "get_current_user"
-  | "list_projects"
-  | "get_project"
-  | "create_project"
-  | "update_project"
-  | "list_sections"
-  | "get_section"
-  | "create_section"
-  | "update_section"
-  | "list_tasks"
-  | "get_task"
-  | "create_task"
-  | "update_task"
-  | "close_task"
-  | "list_comments"
-  | "get_comment"
-  | "create_comment"
-  | "update_comment"
-  | "list_labels";
-
 export const todoistActions: ActionDefinition[] = [
   defineProviderAction(service, {
     name: "get_current_user",
+    operationType: "read",
     description: "Get the current Todoist user profile.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: noInput,
@@ -262,6 +242,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "list_projects",
+    operationType: "read",
     description: "List Todoist projects visible to the connected account.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: listProjectsInput,
@@ -269,6 +250,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "get_project",
+    operationType: "read",
     description: "Get one Todoist project by ID.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: projectLookup,
@@ -276,6 +258,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "create_project",
+    operationType: "write",
     description: "Create a Todoist project.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: createProjectInput,
@@ -283,6 +266,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "update_project",
+    operationType: "write",
     description: "Update a Todoist project.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: updateProjectInput,
@@ -290,6 +274,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "list_sections",
+    operationType: "read",
     description: "List Todoist sections, optionally scoped to a project.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: listSectionsInput,
@@ -297,6 +282,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "get_section",
+    operationType: "read",
     description: "Get one Todoist section by ID.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: sectionLookup,
@@ -304,6 +290,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "create_section",
+    operationType: "write",
     description: "Create a Todoist section.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: createSectionInput,
@@ -311,6 +298,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "update_section",
+    operationType: "write",
     description: "Update a Todoist section.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: updateSectionInput,
@@ -318,6 +306,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "list_tasks",
+    operationType: "read",
     description: "List Todoist tasks using the API v1 filters.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: listTasksInput,
@@ -325,6 +314,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "get_task",
+    operationType: "read",
     description: "Get one Todoist task by ID.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: taskLookup,
@@ -332,6 +322,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "create_task",
+    operationType: "write",
     description: "Create a Todoist task.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: createTaskInput,
@@ -339,6 +330,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "update_task",
+    operationType: "write",
     description: "Update a Todoist task.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: updateTaskInput,
@@ -346,6 +338,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "close_task",
+    operationType: "destructive",
     description: "Close a Todoist task.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: taskLookup,
@@ -353,6 +346,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "list_comments",
+    operationType: "read",
     description: "List Todoist comments by task or project.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: listCommentsInput,
@@ -360,6 +354,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "get_comment",
+    operationType: "read",
     description: "Get one Todoist comment by ID.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: commentLookup,
@@ -367,6 +362,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "create_comment",
+    operationType: "write",
     description: "Create a Todoist comment on a task or project.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: createCommentInput,
@@ -374,6 +370,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "update_comment",
+    operationType: "write",
     description: "Update a Todoist comment.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: updateCommentInput,
@@ -381,6 +378,7 @@ export const todoistActions: ActionDefinition[] = [
   }),
   defineProviderAction(service, {
     name: "list_labels",
+    operationType: "read",
     description: "List Todoist labels visible to the connected account.",
     requiredScopes: todoistOAuthScopes,
     inputSchema: listLabelsInput,

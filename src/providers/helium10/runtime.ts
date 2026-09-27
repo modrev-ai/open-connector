@@ -1,4 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext, ProviderRuntimeHandler } from "../provider-runtime.ts";
 import type { Client } from "@modelcontextprotocol/client";
 import type { JsonSchemaType } from "@modelcontextprotocol/client";
@@ -10,7 +11,7 @@ import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/client/valida
 import { createHash } from "node:crypto";
 import { optionalRecord, requiredString } from "../../core/cast.ts";
 import { withMcpClient } from "../mcp-client.ts";
-import { providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
+import { providerInputError, providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
 
 export const helium10McpEndpoint = "https://mcp.helium10.com/mcp";
 const requestTimeoutMs = 30_000;
@@ -55,7 +56,10 @@ const readOnlyTools = new Set([
 type Tool = Awaited<ReturnType<Client["listTools"]>>["tools"][number];
 type ToolResult = Awaited<ReturnType<Client["callTool"]>>;
 
-export const helium10ActionHandlers: Record<string, ProviderRuntimeHandler<OAuthProviderContext>> = {
+export const helium10ActionHandlers: ProviderActionHandlers<
+  "helium10",
+  ProviderRuntimeHandler<OAuthProviderContext>
+> = {
   async list_tools(_input, context) {
     const tools = await listTools(context);
     return {
@@ -63,7 +67,7 @@ export const helium10ActionHandlers: Record<string, ProviderRuntimeHandler<OAuth
     };
   },
   async call_tool(input, context) {
-    const toolName = requiredString(input.toolName, "toolName", badRequest);
+    const toolName = requiredString(input.toolName, "toolName", providerInputError);
     const args = input.arguments === undefined ? {} : optionalRecord(input.arguments);
     if (!args) throw new ProviderRequestError(400, "arguments must be a JSON object");
     if (!readOnlyTools.has(toolName)) {
@@ -90,13 +94,17 @@ export async function validateHelium10Credential(
   fetcher: typeof fetch,
   signal?: AbortSignal,
 ): Promise<CredentialValidationResult> {
-  const tools = await listTools({ accessToken, fetcher, signal });
-  if (tools.length === 0) throw new ProviderRequestError(502, "Helium 10 MCP did not expose any approved tools");
+  const result = await withClient({ accessToken, fetcher, signal }, (client) =>
+    client.listTools({}, { timeout: requestTimeoutMs, signal }),
+  );
+  if (!result.tools.some((tool) => readOnlyTools.has(tool.name))) {
+    throw new ProviderRequestError(502, "Helium 10 MCP did not expose any approved read-only tools");
+  }
   const tokenHash = createHash("sha256").update(accessToken).digest("hex").slice(0, 16);
   return {
     profile: { accountId: `helium10:mcp:${tokenHash}`, displayName: `Helium 10 MCP · ${tokenHash.slice(-6)}` },
     grantedScopes: ["mcp:tools"],
-    metadata: { mcpEndpoint: helium10McpEndpoint, availableTools: tools.map((tool) => tool.name) },
+    metadata: { mcpEndpoint: helium10McpEndpoint },
   };
 }
 
@@ -157,8 +165,4 @@ function normalizeResult(result: ToolResult): unknown {
   } catch {
     return text.text;
   }
-}
-
-function badRequest(message: string): ProviderRequestError {
-  return new ProviderRequestError(400, message);
 }

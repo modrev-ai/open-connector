@@ -1,9 +1,14 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
-import type { FirecrawlActionName } from "./actions.ts";
 
 import { compactObject, optionalNumber, optionalRecord, optionalString, pickOptionalBoolean } from "../../core/cast.ts";
-import { defineApiKeyProviderExecutors, providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
+import {
+  defineApiKeyProviderExecutors,
+  defineProviderProxy,
+  providerUserAgent,
+  ProviderRequestError,
+} from "../provider-runtime.ts";
 
 const service = "firecrawl";
 const firecrawlApiBaseUrl = "https://api.firecrawl.dev";
@@ -42,7 +47,7 @@ type FirecrawlRequestPhase = "validate" | "execute";
 type FirecrawlActionContext = ApiKeyProviderContext;
 type FirecrawlActionHandler = (input: Record<string, unknown>, context: FirecrawlActionContext) => Promise<unknown>;
 
-export const firecrawlActionHandlers: Record<FirecrawlActionName, FirecrawlActionHandler> = {
+export const firecrawlActionHandlers: ProviderActionHandlers<"firecrawl", FirecrawlActionHandler> = {
   scrape: firecrawlPostAction("/v2/scrape", buildDirectBody),
   batch_scrape: firecrawlPostAction("/v2/batch/scrape", buildDirectBody),
   batch_scrape_get: firecrawlGetAction((input) => `/v2/batch/scrape/${String(input.id)}`),
@@ -76,6 +81,13 @@ export const firecrawlActionHandlers: Record<FirecrawlActionName, FirecrawlActio
 };
 
 export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, firecrawlActionHandlers);
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: firecrawlApiBaseUrl,
+  auth: { type: "api_key_authorization", prefix: "Bearer " },
+  skipDnsValidation: true,
+});
 
 export const credentialValidators: CredentialValidators = {
   async apiKey(input, { fetcher, signal }) {

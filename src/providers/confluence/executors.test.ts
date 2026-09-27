@@ -22,31 +22,27 @@ afterEach(() => {
 });
 
 describe("Confluence OAuth credentials", () => {
-  it("discovers the authorized cloud site and validates its v2 API", async () => {
+  it("discovers the authorized cloud site", async () => {
     const requests: URL[] = [];
     const result = await credentialValidators.oauth2!(oauthCredential, {
       fetcher: async (input, init) => {
         const url = new URL(input.toString());
         requests.push(url);
         expect(new Headers(init?.headers).get("authorization")).toBe("Bearer confluence-oauth-token");
-        if (url.pathname === "/oauth/token/accessible-resources") {
-          return Response.json([
-            {
-              id: "cloud-123",
-              name: "Docs",
-              url: "https://docs.atlassian.net",
-              scopes: confluenceOAuthScopes,
-              avatarUrl: "https://docs.atlassian.net/avatar.png",
-            },
-          ]);
-        }
-        expect(url.pathname).toBe("/ex/confluence/cloud-123/wiki/api/v2/spaces");
-        expect(url.searchParams.get("limit")).toBe("1");
-        return Response.json({ results: [{ id: "space-1" }] });
+        expect(url.pathname).toBe("/oauth/token/accessible-resources");
+        return Response.json([
+          {
+            id: "cloud-123",
+            name: "Docs",
+            url: "https://docs.atlassian.net",
+            scopes: confluenceOAuthScopes,
+            avatarUrl: "https://docs.atlassian.net/avatar.png",
+          },
+        ]);
       },
     });
 
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
     expect(result).toMatchObject({
       profile: {
         accountId: "confluence:cloud-123",
@@ -59,8 +55,7 @@ describe("Confluence OAuth credentials", () => {
         siteUrl: "https://docs.atlassian.net",
         baseUrl: "https://api.atlassian.com/ex/confluence/cloud-123/wiki/api/v2",
         restApiBaseUrl: "https://api.atlassian.com/ex/confluence/cloud-123/wiki/rest/api",
-        validationEndpoint: "/spaces",
-        validationResultCount: 1,
+        validationEndpoint: "/oauth/token/accessible-resources",
       },
     });
   });
@@ -83,6 +78,52 @@ describe("Confluence OAuth credentials", () => {
           ]),
       }),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("multiple sites") });
+  });
+
+  it("accepts a token without an accessible Confluence site", async () => {
+    const result = await credentialValidators.oauth2!(oauthCredential, {
+      fetcher: async () => Response.json([]),
+    });
+
+    expect(result).toEqual({
+      profile: {
+        accountId: "confluence",
+        displayName: "Confluence Cloud",
+        grantedScopes: [],
+      },
+      grantedScopes: [],
+      metadata: {
+        resourceCount: 0,
+        validationEndpoint: "/oauth/token/accessible-resources",
+      },
+    });
+  });
+
+  it("accepts well-formed resources without Confluence product scopes", async () => {
+    const result = await credentialValidators.oauth2!(oauthCredential, {
+      fetcher: async () =>
+        Response.json([{ id: "cloud-123", url: "https://jira.atlassian.net", scopes: ["read:jira-work"] }]),
+    });
+
+    expect(result).toMatchObject({
+      profile: { accountId: "confluence", displayName: "Confluence Cloud" },
+      metadata: { resourceCount: 1 },
+    });
+  });
+
+  it("rejects malformed accessible-resource responses", async () => {
+    await expect(
+      credentialValidators.oauth2!(oauthCredential, { fetcher: async () => Response.json({}) }),
+    ).rejects.toMatchObject({
+      status: 502,
+      message: "Confluence accessible-resources response must be an array",
+    });
+  });
+
+  it("rejects malformed accessible-resource entries", async () => {
+    await expect(
+      credentialValidators.oauth2!(oauthCredential, { fetcher: async () => Response.json([{}]) }),
+    ).rejects.toMatchObject({ status: 502, message: "Confluence accessible resource id is required." });
   });
 
   it("times out accessible-resource discovery", async () => {
