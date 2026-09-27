@@ -225,7 +225,7 @@ const actions: JiraActionSource[] = [
   action(
     "list_transitions",
     "read",
-    "List the workflow transitions available to one Jira issue from its current status. A transition's name is not its target status (\"Work Complete\" can lead to Done), so each carries the status it leads to.",
+    'List the workflow transitions available to one Jira issue from its current status. A transition\'s name is not its target status ("Work Complete" can lead to Done), so each carries the status it leads to.',
     jiraReadScopes,
     input({ issueIdOrKey: s.string({ minLength: 1, description: "Jira issue ID or key." }) }, ["issueIdOrKey"]),
     object({ issueIdOrKey: s.string({ description: "The issue asked about." }), transitions: s.array(transition) }),
@@ -244,7 +244,8 @@ const actions: JiraActionSource[] = [
         }),
         transitionName: s.string({
           minLength: 1,
-          description: "Exact transition name, used when no transitionId is given; must name exactly one available transition.",
+          description:
+            "Exact transition name, used when no transitionId is given; must name exactly one available transition.",
         }),
       },
       ["issueIdOrKey"],
@@ -252,7 +253,10 @@ const actions: JiraActionSource[] = [
     object({
       issueIdOrKey: s.string({ description: "The issue moved." }),
       transition: s.object(
-        { id: s.string({ description: "Transition ID applied." }), name: s.string({ description: "Transition name." }) },
+        {
+          id: s.string({ description: "Transition ID applied." }),
+          name: s.string({ description: "Transition name." }),
+        },
         { required: ["id", "name"], description: "The transition applied." },
       ),
       status: status,

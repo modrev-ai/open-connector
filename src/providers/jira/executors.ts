@@ -579,8 +579,13 @@ async function transitionIssue(input: Record<string, unknown>, context: JiraActi
     : available.filter((t) => t.name === wantedName);
   if (matches.length !== 1) {
     const asked = wantedId ? `transition ${wantedId}` : `transition "${wantedName}"`;
-    const why = matches.length ? "matches more than one available transition" : "is not available from the issue's current status";
-    throw new ProviderRequestError(400, `${asked} ${why} for ${issueIdOrKey}; available: ${describeTransitions(available)}`);
+    const why = matches.length
+      ? "matches more than one available transition"
+      : "is not available from the issue's current status";
+    throw new ProviderRequestError(
+      400,
+      `${asked} ${why} for ${issueIdOrKey}; available: ${describeTransitions(available)}`,
+    );
   }
   const chosen = matches[0]!;
 

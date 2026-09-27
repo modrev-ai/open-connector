@@ -65,14 +65,17 @@ const transitions = [
   { id: "3", name: "Not required", to: { id: "10011", name: "Closed" } },
 ];
 
-function fakeJira(opts: { landed?: string; refusePost?: { status: number; body: unknown }; list?: typeof transitions } = {}) {
+function fakeJira(
+  opts: { landed?: string; refusePost?: { status: number; body: unknown }; list?: typeof transitions } = {},
+) {
   const sent: Sent[] = [];
   const fetcher = (async (url: string | URL, init?: RequestInit) => {
     const u = new URL(url.toString());
     const path = u.pathname.replace(/^\/ex\/jira\/[^/]+\/rest\/api\/3/, "");
     const method = init?.method ?? "GET";
     sent.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (path === "/issue/PROJ-1/transitions" && method === "GET") return Response.json({ transitions: opts.list ?? transitions });
+    if (path === "/issue/PROJ-1/transitions" && method === "GET")
+      return Response.json({ transitions: opts.list ?? transitions });
     if (path === "/issue/PROJ-1/transitions" && method === "POST") {
       if (opts.refusePost) return Response.json(opts.refusePost.body, { status: opts.refusePost.status });
       return new Response(null, { status: 204 });
@@ -128,7 +131,9 @@ describe("jira.transition_issue", () => {
       refusePost: { status: 400, body: { errorMessages: ["You must resolve all subtasks first."] } },
     });
     const refused = jiraActionHandlers.transition_issue({ issueIdOrKey: "PROJ-1", transitionId: "16" }, context);
-    await expect(refused).rejects.toThrow(/refused transition 16 "Review Done".*resolve all subtasks.*available now: 9/);
+    await expect(refused).rejects.toThrow(
+      /refused transition 16 "Review Done".*resolve all subtasks.*available now: 9/,
+    );
   });
 
   it("resolves an exact name, and refuses a name that matches more than one transition", async () => {
@@ -136,7 +141,9 @@ describe("jira.transition_issue", () => {
     await jiraActionHandlers.transition_issue({ issueIdOrKey: "PROJ-1", transitionName: "Not required" }, context);
     expect(sent.find((s) => s.method === "POST")?.body).toEqual({ transition: { id: "3" } });
 
-    const twice = fakeJira({ list: [...transitions, { id: "30", name: "Not required", to: { id: "1", name: "Todo" } }] });
+    const twice = fakeJira({
+      list: [...transitions, { id: "30", name: "Not required", to: { id: "1", name: "Todo" } }],
+    });
     await expect(
       jiraActionHandlers.transition_issue({ issueIdOrKey: "PROJ-1", transitionName: "Not required" }, twice.context),
     ).rejects.toThrow(/matches more than one/);
