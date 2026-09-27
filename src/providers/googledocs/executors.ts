@@ -4,14 +4,14 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { GoogledocsActionName } from "./actions.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { Buffer } from "node:buffer";
 import { integer, objectArray } from "../../core/cast.ts";
 import {
   googleJsonRequest as googleJsonRequestShared,
   googleRequest as googleRequestShared,
-} from "../google-runtime.ts";
+} from "../googledrive/runtime-request.ts";
 import {
   asObject,
   asOptionalObject,
@@ -82,7 +82,7 @@ type BatchUpdateResponse = {
   writeControl?: Record<string, unknown>;
 };
 
-export const googledocsActionHandlers: Record<GoogledocsActionName, ActionHandler> = {
+export const googledocsActionHandlers: ProviderActionHandlers<"googledocs", ActionHandler> = {
   copy_document(input, { accessToken, fetcher }) {
     return copyDocument(input, accessToken, fetcher);
   },
@@ -275,7 +275,7 @@ export const googledocsActionHandlers: Record<GoogledocsActionName, ActionHandle
       fetcher,
     );
   },
-} satisfies Record<GoogledocsActionName, ActionHandler>;
+};
 
 export const executors: ProviderExecutors = defineProviderExecutors<ActionContext>({
   service: "googledocs",

@@ -1,6 +1,7 @@
-import type { ProviderExecutors } from "../../core/types.ts";
+import type { ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
-import { defineProviderExecutors, ProviderRequestError } from "../provider-runtime.ts";
+import { defineProviderExecutors, defineProviderProxy, ProviderRequestError } from "../provider-runtime.ts";
 
 const service = "biorxiv_medrxiv";
 const biorxivMedrxivApiBaseUrl = "https://api.biorxiv.org";
@@ -22,7 +23,7 @@ interface ActionContext {
 }
 type ActionHandler = (input: Record<string, unknown>, context: ActionContext) => Promise<unknown>;
 
-const handlers: Record<string, ActionHandler> = {
+const handlers: ProviderActionHandlers<"biorxiv_medrxiv", ActionHandler> = {
   list_preprints: (input, context) => executeBiorxivMedrxivAction("list_preprints", input, context.fetcher),
   get_preprint: (input, context) => executeBiorxivMedrxivAction("get_preprint", input, context.fetcher),
   list_published_articles: (input, context) =>
@@ -39,6 +40,16 @@ export const executors: ProviderExecutors = defineProviderExecutors<ActionContex
   handlers,
   createContext: (_context, fetcher) => ({ fetcher }),
   skipDnsValidation: true,
+});
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: biorxivMedrxivApiBaseUrl,
+  auth: { type: "none" },
+  skipDnsValidation: true,
+  customizeRequest({ headers }) {
+    headers.set("accept", "application/json");
+  },
 });
 
 async function executeBiorxivMedrxivAction(actionName: string, input: Record<string, unknown>, fetcher: typeof fetch) {

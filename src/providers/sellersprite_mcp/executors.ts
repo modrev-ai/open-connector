@@ -1,4 +1,5 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 import type { Client } from "@modelcontextprotocol/client";
 
@@ -7,24 +8,36 @@ import { SdkHttpError } from "@modelcontextprotocol/client";
 import { ProtocolError } from "@modelcontextprotocol/client";
 import { createHash } from "node:crypto";
 import { withMcpClient } from "../mcp-client.ts";
-import { defineApiKeyProviderExecutors, providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
-import { sellerSpriteMcpOfficialActions } from "./official-actions.ts";
+import {
+  defineApiKeyProviderExecutors,
+  defineProviderProxy,
+  mapProviderActionHandlers,
+  providerUserAgent,
+  ProviderRequestError,
+} from "../provider-runtime.ts";
+import { sellerspriteMcpActions } from "./actions.ts";
 
 const service = "sellersprite_mcp";
 const endpoint = "https://mcp.sellersprite.com/mcp";
 const timeoutMs = 60_000;
 type Context = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
 type ToolResult = Awaited<ReturnType<Client["callTool"]>>;
-const handlers: Record<string, (input: Record<string, unknown>, context: Context) => Promise<unknown>> = {
-  async list_tools(_input, context) {
-    return { tools: await discover(context) };
+type SellerSpriteMcpHandler = (input: Record<string, unknown>, context: Context) => Promise<unknown>;
+
+const handlers: ProviderActionHandlers<"sellersprite_mcp", SellerSpriteMcpHandler> = mapProviderActionHandlers(
+  service,
+  sellerspriteMcpActions,
+  (_action, name): SellerSpriteMcpHandler => {
+    if (name === "list_tools") {
+      return async (_input, context) => ({ tools: await discover(context) });
+    }
+    if (name === "call_tool") {
+      return (input, context) => call(context, required(input.toolName, "toolName"), object(input.arguments));
+    }
+    return (input, context) =>
+      call(context, name, name === "traffic_extend" ? { ...input, queryType: input.queryType ?? 2 } : input);
   },
-  call_tool(input, context) {
-    return call(context, required(input.toolName, "toolName"), object(input.arguments));
-  },
-};
-for (const action of sellerSpriteMcpOfficialActions)
-  handlers[action.name] = (input, context) => call(context, action.name, input);
+);
 export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, handlers, {
   skipDnsValidation: true,
 });
@@ -41,6 +54,22 @@ export const credentialValidators: CredentialValidators = {
     };
   },
 };
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: "https://mcp.sellersprite.com",
+  auth: { type: "api_key_header", name: "secret-key" },
+  skipDnsValidation: true,
+  timeoutMs,
+  redirect: "manual",
+  customizeRequest({ url, headers }) {
+    if (url.toString() !== endpoint) {
+      throw new ProviderRequestError(400, "SellerSprite MCP proxy only supports the official /mcp endpoint");
+    }
+    if (!headers.has("accept")) headers.set("accept", "application/json, text/event-stream");
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  },
+});
 async function discover(context: Context): Promise<unknown[]> {
   return withClient(context, async (client) => {
     const result = await client.listTools({}, { timeout: timeoutMs });
@@ -85,7 +114,9 @@ function normalize(result: ToolResult): unknown {
       )
     )
       throw new ProviderRequestError(401, message, envelope);
-    if (envelope.code === "ERROR_VISIT_MAX") throw new ProviderRequestError(429, message, envelope);
+    if (envelope.code === "ERROR_VISIT_MAX" || envelope.code === "ERROR_MAXIMUM_ACCESS_PER_MINUTE") {
+      throw new ProviderRequestError(429, message, envelope);
+    }
     if (envelope.code === "ERROR_AUTH_ERROR") throw new ProviderRequestError(403, message, envelope);
     if (envelope.code === "ERROR_PARAM") throw new ProviderRequestError(400, message, envelope);
     throw new ProviderRequestError(502, message, envelope);
@@ -94,7 +125,9 @@ function normalize(result: ToolResult): unknown {
   if (result.structuredContent) return result.structuredContent;
   return result;
 }
-function errorEnvelope(result: ToolResult): { code: string; message?: string } | undefined {
+function errorEnvelope(
+  result: ToolResult,
+): { code: string; message?: string; providerResponse: Record<string, unknown> } | undefined {
   const candidates: unknown[] = [];
   if ("structuredContent" in result) candidates.push(result.structuredContent);
   const content = "content" in result && Array.isArray(result.content) ? result.content : [];
@@ -117,17 +150,21 @@ function errorEnvelope(result: ToolResult): { code: string; message?: string } |
     const record = object(candidate);
     const code = typeof record.code === "string" ? record.code.trim() : "";
     if (code.startsWith("ERROR_"))
-      return { code, message: typeof record.message === "string" ? record.message.trim() : undefined };
+      return {
+        code,
+        message: typeof record.message === "string" ? record.message.trim() : undefined,
+        providerResponse: record,
+      };
   }
   return undefined;
 }
 function mapError(error: unknown): ProviderRequestError {
   if (error instanceof ProviderRequestError) return error;
   if (error instanceof UnauthorizedError)
-    return new ProviderRequestError(401, "SellerSprite MCP Secret Key is invalid, expired, or inactive", error);
+    return new ProviderRequestError(401, "SellerSprite MCP request was unauthorized", error);
   if (error instanceof SdkHttpError)
     return new ProviderRequestError(
-      error.status === 401 || error.status === 403 ? 401 : error.status === 429 ? 429 : 502,
+      error.status === 401 || error.status === 403 || error.status === 429 ? error.status : 502,
       `SellerSprite MCP request failed: ${error.message}`,
       error,
     );

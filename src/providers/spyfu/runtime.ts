@@ -1,4 +1,4 @@
-import type { SpyfuActionName } from "./actions.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import {
   optionalBoolean,
@@ -24,7 +24,7 @@ type SpyfuRequestMethod = "GET" | "POST";
 type SpyfuQuery = Record<string, string | number | boolean | undefined>;
 type SpyfuActionHandler = (input: Record<string, unknown>, fetcher: typeof fetch, apiKey: string) => Promise<unknown>;
 
-export const spyfuActionHandlers: Record<SpyfuActionName, SpyfuActionHandler> = {
+export const spyfuActionHandlers: ProviderActionHandlers<"spyfu", SpyfuActionHandler> = {
   async get_monthly_usage(input, fetcher, apiKey) {
     const usageMonth = readUsageMonth(input.usageMonth);
     const payload = await requestSpyfuJson({
@@ -453,7 +453,7 @@ export const spyfuActionHandlers: Record<SpyfuActionName, SpyfuActionHandler> = 
       topAds: readOptionalResultRows(record.topAds),
     };
   },
-} satisfies Record<SpyfuActionName, SpyfuActionHandler>;
+};
 
 const ppcRouteBySearchType = {
   current_ads: "/apis/serp_api/v2/ppc/getPaidSerps",
@@ -488,22 +488,6 @@ export async function validateSpyfuCredential(
       usageEntryCount: usage.length,
     },
   };
-}
-
-export async function executeSpyfuAction(
-  input: {
-    apiKey: string;
-    actionName: SpyfuActionName;
-    input: Record<string, unknown>;
-  },
-  fetcher: typeof fetch,
-): Promise<unknown> {
-  const handler = spyfuActionHandlers[input.actionName];
-  if (!handler) {
-    throw new ProviderRequestError(500, `spyfu action is not implemented yet: ${input.actionName}`);
-  }
-
-  return handler(input.input, fetcher, requiredApiKey(input));
 }
 
 function buildSharedKeywordQuery(input: Record<string, unknown>): SpyfuQuery {
@@ -600,7 +584,7 @@ function createSpyfuError(response: Response, payload: unknown, phase: SpyfuRequ
   }
 
   if (phase === "execute" && (response.status === 401 || response.status === 403)) {
-    return new ProviderRequestError(409, message);
+    return new ProviderRequestError(401, message);
   }
 
   if (phase === "execute" && response.status >= 400 && response.status < 500) {

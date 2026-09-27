@@ -1,7 +1,8 @@
 import type { CredentialValidationResult, ResolvedCredential } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
-import { compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
-import { providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
+import { booleanString, compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
+import { isAbortLikeError, providerUserAgent, ProviderRequestError, requiredInputString } from "../provider-runtime.ts";
 import { readAlpacaGrantedScopes } from "./scopes.ts";
 
 const paperTradingBaseUrl = "https://paper-api.alpaca.markets";
@@ -37,7 +38,7 @@ export interface ActionContext {
 
 type ActionHandler = (input: Record<string, unknown>, context: ActionContext) => Promise<unknown>;
 
-export const alpacaActionHandlers: Record<string, ActionHandler> = {
+export const alpacaActionHandlers: ProviderActionHandlers<"alpaca", ActionHandler> = {
   async get_account(_input, context) {
     return {
       account: await requestAlpacaJson({
@@ -107,7 +108,7 @@ export const alpacaActionHandlers: Record<string, ActionHandler> = {
         after: optionalString(input.after),
         until: optionalString(input.until),
         direction: optionalString(input.direction),
-        nested: optionalBooleanString(input.nested),
+        nested: booleanString(input.nested),
         symbols: optionalStringList(input.symbols),
       }),
       context,
@@ -318,7 +319,7 @@ export const alpacaActionHandlers: Record<string, ActionHandler> = {
       path: "/v2/options/contracts",
       query: compactObject({
         underlying_symbols: optionalStringList(input.underlyingSymbols),
-        show_deliverables: optionalBooleanString(input.showDeliverables),
+        show_deliverables: booleanString(input.showDeliverables),
         status: optionalString(input.status),
         expiration_date: optionalString(input.expirationDate),
         expiration_date_gte: optionalString(input.expirationDateGte),
@@ -330,7 +331,7 @@ export const alpacaActionHandlers: Record<string, ActionHandler> = {
         strike_price_lte: optionalNumberString(input.strikePriceLte),
         page_token: optionalString(input.pageToken),
         limit: optionalNumberString(input.limit),
-        ppind: optionalBooleanString(input.ppind),
+        ppind: booleanString(input.ppind),
       }),
       context,
       phase: "execute",
@@ -385,8 +386,8 @@ export const alpacaActionHandlers: Record<string, ActionHandler> = {
       query: compactObject({
         symbols: optionalStringList(input.symbols),
         limit: optionalNumberString(input.limit),
-        include_content: optionalBooleanString(input.includeContent),
-        exclude_contentless: optionalBooleanString(input.excludeContentless),
+        include_content: booleanString(input.includeContent),
+        exclude_contentless: booleanString(input.excludeContentless),
         start: optionalString(input.start),
         end: optionalString(input.end),
         sort: optionalString(input.sort),
@@ -719,14 +720,6 @@ function optionalNumberString(value: unknown): string | undefined {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : undefined;
 }
 
-function optionalBooleanString(value: unknown): string | undefined {
-  return typeof value === "boolean" ? String(value) : undefined;
-}
-
-function requiredInputString(value: unknown, fieldName: string): string {
-  return requiredString(value, fieldName, (message) => new ProviderRequestError(400, message));
-}
-
 function readEnvironment(value: unknown, fallback?: Environment): Environment {
   const normalized = optionalString(value) ?? fallback;
   if (normalized === "paper" || normalized === "live") {
@@ -734,8 +727,4 @@ function readEnvironment(value: unknown, fallback?: Environment): Environment {
   }
 
   throw new ProviderRequestError(400, "environment must be paper or live");
-}
-
-function isAbortLikeError(error: unknown): boolean {
-  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 }

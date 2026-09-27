@@ -6,18 +6,28 @@ import type {
   ProviderProxyExecutor,
   ResolvedCredential,
 } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { Buffer } from "node:buffer";
 import { createPrivateKey, createSign, randomBytes } from "node:crypto";
-import { optionalInteger, optionalRecord, optionalString, requiredRecord, requiredString } from "../../core/cast.ts";
+import {
+  compactObject,
+  optionalInteger,
+  optionalRecord,
+  optionalString,
+  requiredRecord,
+  requiredString,
+} from "../../core/cast.ts";
 import { queryParams } from "../../core/request.ts";
 import {
   createProviderFetch,
   createProviderProxyUrl,
   defineProviderExecutors,
   normalizeProviderProxyHeaders,
+  providerInputError,
   ProviderRequestError,
+  providerResponseError,
   providerUserAgent,
   readProviderProxyErrorMessage,
   readProviderProxyResponse,
@@ -28,6 +38,7 @@ import { readCoinbaseGrantedScopes } from "./scopes.ts";
 const service = "coinbase";
 const coinbaseApiBaseUrl = "https://api.coinbase.com";
 const accountsPath = "/api/v3/brokerage/accounts";
+const oauthUserPath = "/v2/user";
 const coinbaseFetch = createProviderFetch({ skipDnsValidation: true });
 
 type CoinbaseRequestPhase = "validate" | "execute";
@@ -39,7 +50,7 @@ interface CoinbaseActionContext {
 }
 type CoinbaseActionHandler = (input: Record<string, unknown>, context: CoinbaseActionContext) => Promise<unknown>;
 
-export const coinbaseActionHandlers: Record<string, CoinbaseActionHandler> = {
+export const coinbaseActionHandlers: ProviderActionHandlers<"coinbase", CoinbaseActionHandler> = {
   list_accounts(input, context) {
     return coinbaseGetJson(
       accountsPath,
@@ -107,10 +118,9 @@ export const credentialValidators: CredentialValidators = {
     );
   },
   async oauth2(input, { fetcher, signal }) {
-    return validateCoinbaseCredential(
+    return validateCoinbaseOAuthCredential(
       createCoinbaseOAuthContext(input, fetcher, signal),
       readCoinbaseGrantedScopes(input.metadata.scope),
-      "Coinbase OAuth",
     );
   },
 };
@@ -196,6 +206,34 @@ function createCoinbaseOAuthContext(
     },
     fetcher,
     signal,
+  };
+}
+
+async function validateCoinbaseOAuthCredential(
+  context: CoinbaseActionContext,
+  grantedScopes: string[],
+): Promise<CredentialValidationResult> {
+  const payload = requiredRecord(
+    await coinbaseGetJson(oauthUserPath, {}, context, "validate"),
+    "coinbase user response",
+    providerResponseError,
+  );
+  const user = optionalRecord(payload.data) ?? payload;
+  const userId = optionalString(user.id);
+  if (!userId) {
+    throw new ProviderRequestError(502, "coinbase user response is missing id");
+  }
+  return {
+    profile: {
+      accountId: userId,
+      displayName: optionalString(user.name) ?? optionalString(user.username) ?? "Coinbase OAuth",
+    },
+    grantedScopes,
+    metadata: compactObject({
+      validationEndpoint: oauthUserPath,
+      apiBaseUrl: coinbaseApiBaseUrl,
+      userId,
+    }),
   };
 }
 
@@ -300,14 +338,6 @@ function readAccountsArray(payload: unknown): Array<Record<string, unknown>> {
     throw new ProviderRequestError(502, "Coinbase response missing accounts");
   }
   return record.accounts.map((item) => requiredRecord(item, "account", providerResponseError));
-}
-
-function providerInputError(message: string): ProviderRequestError {
-  return new ProviderRequestError(400, message);
-}
-
-function providerResponseError(message: string): ProviderRequestError {
-  return new ProviderRequestError(502, message);
 }
 
 function base64UrlJson(value: unknown): string {

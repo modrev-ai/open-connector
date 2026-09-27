@@ -1,3 +1,4 @@
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-runtime.ts";
 
 import {
@@ -17,7 +18,6 @@ import {
 
 export const tianyanchaApiBaseUrl = "https://open.api.tianyancha.com";
 
-const tianyanchaRequestTimeoutMs = 30_000;
 const tenderSearchTypeCode: Record<string, number> = { title: 1, purchaser: 2, supplier: 3 };
 const tenderNoticeTypeCode: Record<string, number> = { forecast: 1, announcement: 2, result: 4 };
 const relationshipTypeCode: Record<string, string> = {
@@ -61,7 +61,10 @@ const actionPathByName: Record<string, string> = {
   list_company_news: "/services/open/ps/news/2.0",
 };
 
-export const tianyanchaActionHandlers: Record<string, ProviderRuntimeHandler<ApiKeyProviderContext>> = {
+export const tianyanchaActionHandlers: ProviderActionHandlers<
+  "tianyancha",
+  ProviderRuntimeHandler<ApiKeyProviderContext>
+> = {
   search_companies: action("search_companies"),
   search_companies_advanced: action("search_companies_advanced"),
   get_company_basic_info: action("get_company_basic_info"),
@@ -214,7 +217,7 @@ async function requestTianyanchaResult(input: {
     if (value !== undefined) url.searchParams.set(name, String(value));
   }
 
-  const timeout = createProviderTimeout(input.context.signal, tianyanchaRequestTimeoutMs);
+  const timeout = createProviderTimeout(input.context.signal);
   try {
     const response = await input.context.fetcher(url, {
       method: "GET",

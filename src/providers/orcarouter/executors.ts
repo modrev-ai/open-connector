@@ -1,8 +1,14 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 
 import { compactObject, optionalString } from "../../core/cast.ts";
-import { defineApiKeyProviderExecutors, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
+import {
+  defineApiKeyProviderExecutors,
+  defineProviderProxy,
+  ProviderRequestError,
+  providerUserAgent,
+} from "../provider-runtime.ts";
 
 const service = "orcarouter";
 const orcarouterApiBaseUrl = "https://api.orcarouter.ai/v1";
@@ -20,7 +26,7 @@ interface OrcarouterRequestInput {
   mode?: "validate" | "execute";
 }
 
-export const orcarouterActionHandlers: Record<string, OrcarouterActionHandler> = {
+export const orcarouterActionHandlers: ProviderActionHandlers<"orcarouter", OrcarouterActionHandler> = {
   create_chat_completion(input, context) {
     assertStreamingDisabled(input);
     return orcarouterRequest(
@@ -63,6 +69,13 @@ export const orcarouterActionHandlers: Record<string, OrcarouterActionHandler> =
 };
 
 export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, orcarouterActionHandlers);
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: orcarouterApiBaseUrl,
+  auth: { type: "api_key_authorization", prefix: "Bearer " },
+  skipDnsValidation: true,
+});
 
 export const credentialValidators: CredentialValidators = {
   async apiKey(input, { fetcher, signal }) {

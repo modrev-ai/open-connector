@@ -1,11 +1,12 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
-import { isPrivateNetworkAccessAllowed } from "../../core/request.ts";
+import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import {
   createProviderFetch,
   defineProviderExecutors,
   defineProviderProxy,
+  providerInputError,
   ProviderRequestError,
   providerUserAgent,
   requireApiKeyCredential,
@@ -18,17 +19,22 @@ interface Context {
   fetcher: typeof fetch;
   signal?: AbortSignal;
 }
-const inputError = (message: string) => new ProviderRequestError(400, message);
-function normalizeBaseUrl(value: unknown): string {
-  const text = requiredString(value, "baseUrl", inputError);
+export function normalizeBaseUrl(value: unknown): string {
+  const text = requiredString(value, "baseUrl", providerInputError);
   let url: URL;
   try {
     url = new URL(text);
   } catch {
-    throw inputError("baseUrl must be a valid http(s) URL");
+    throw providerInputError("baseUrl must be a valid http(s) URL");
   }
   if (!["http:", "https:"].includes(url.protocol) || url.pathname !== "/")
-    throw inputError("baseUrl must be the Easy8 instance root URL without a path");
+    throw providerInputError("baseUrl must be the Easy8 instance root URL without a path");
+  assertPublicHttpUrl(url.toString(), {
+    fieldName: "baseUrl",
+    createError: providerInputError,
+    allowPrivateNetwork: isPrivateNetworkAccessAllowed(),
+  });
+  if (url.username || url.password) throw providerInputError("baseUrl must not include credentials");
   url.search = "";
   url.hash = "";
   const normalized = url.toString();
@@ -139,11 +145,11 @@ function issueBody(input: Record<string, unknown>): Record<string, unknown> {
 }
 function id(input: Record<string, unknown>, key: string): number {
   const value = optionalInteger(input[key]);
-  if (!value || value < 1) throw inputError(`${key} must be a positive integer`);
+  if (!value || value < 1) throw providerInputError(`${key} must be a positive integer`);
   return value;
 }
 function requireUpdate(body: Record<string, unknown>, action: string): void {
-  if (!Object.keys(body).length) throw inputError(`${action} requires a field to update`);
+  if (!Object.keys(body).length) throw providerInputError(`${action} requires a field to update`);
 }
 const handlers = {
   async list_projects(input: Record<string, unknown>, context: Context) {
