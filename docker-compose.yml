@@ -4,7 +4,9 @@ services:
   connector:
     image: ghcr.io/oomol-lab/open-connector:latest
     ports:
-      - "3000:3000"
+      # Loopback only (MRO-1039): the hub and this box's sessions are its only clients, and a
+      # bare "3000:3000" published it on every interface. Rollback: the line was "3000:3000".
+      - "127.0.0.1:3000:3000"
     volumes:
       - connector-data:/app/data
     environment:

@@ -1,0 +1,11 @@
+# MRO-806: run open-connector from the fork's own image (Jong: "yes, build from the fork").
+# Only the image changes; ports, volume and environment come from docker-compose.yml and
+# docker-compose.override.yml. Committed here (MRO-1039) because the running project named this
+# file from a %TEMP% scratchpad (oc-image-fork.yml there, byte-for-byte the same image line),
+# where files have been deleted by a clean-up whose cause is unknown (MRO-920 c16271/c16272).
+# Start the stack with all three files:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml \
+#     -f docker-compose.fork.yml --env-file <the hub's open-connector.env> up -d
+services:
+  connector:
+    image: modrev/open-connector:fork-833f5a6
