@@ -1,0 +1,36 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: open-connector
+  description: OpenConnector, an open-source connector gateway that exposes a shared catalog of third-party app Actions to agents over MCP and HTTP, run here as the Docker container open-connector-connector-1 and used as a hub upstream.
+  tags: [node, typescript, docker, sqlite, postgresql, mcp, openapi]
+  annotations:
+    modrev.ai/build: "docker compose -f docker-compose.yml -f docker-compose.build.yml up --build"
+    modrev.ai/run: "docker compose up"
+  links:
+    - url: README.md
+    - url: docs/quickstart.md
+    - url: docs/runtime-api.md
+    - url: docs/configuration.md
+    - url: docs/credentials.md
+    - url: docs/docker-ghcr.md
+spec:
+  type: service
+  lifecycle: production
+  owner: unassigned
+  features:
+    - Connects a user's app accounts once and reuses them across agents and applications
+    - Catalog of prebuilt provider Actions across products such as GitHub, Gmail, Notion, Slack and BigQuery
+    - Handles API key, OAuth2, custom and no-auth credentials, keeping provider secrets behind the runtime boundary
+    - Exposes Actions to agent hosts over MCP at /mcp and to custom clients over HTTP at /v1/actions with a generated OpenAPI document
+    - Inspectable Action contracts with request and response schemas and required scopes
+    - Runtime controls for connection identity, scopes, runtime tokens, allow and block policies and redacted run logs
+    - Web Console for browsing providers, configuring credentials and OAuth clients, creating runtime tokens and debugging Actions
+    - Stores runtime state in SQLite by default or PostgreSQL 15 or newer, with explicit migrations
+  subcomponents:
+    - src/providers/, one folder per provider service with its Actions
+    - web/, the Web Console
+    - catalog/, the provider and Action catalog
+    - migrations/, runtime database migrations
+    - docker/ and the docker-compose files, the container image and local compose setup
+    - docs/, quickstart, runtime API, configuration, credentials and deployment guides
