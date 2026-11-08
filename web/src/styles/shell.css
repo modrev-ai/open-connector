@@ -120,7 +120,7 @@
   height: 34px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgb(255, 255, 255);
+  background: var(--brand-tile);
   object-fit: cover;
 }
 

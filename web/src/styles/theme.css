@@ -117,6 +117,8 @@
   --sidebar-accent-foreground: rgb(41, 41, 41);
   --sidebar-border: rgb(233, 233, 233);
   --sidebar-ring: rgb(124, 157, 255);
+  /* The brand mark's tile: the logo is drawn for white, in every theme (TH-670: named once here, not in shell.css). */
+  --brand-tile: rgb(255, 255, 255);
 }
 .dark {
   color-scheme: dark;
@@ -157,6 +159,47 @@
   --sidebar-accent-foreground: rgb(235, 235, 235);
   --sidebar-border: rgb(57, 57, 57);
   --sidebar-ring: rgb(124, 157, 255);
+}
+/* TH-670 (Jong, 2026-11-09: "ensure all color theme matches across all apps and modules of brainet"): inside
+   Mastermind (MKB > Connectors), public/theme-boot.js sets data-theme, and the console's tokens are Mastermind's roles
+   (--mm-<role>, theme/mm-themes.css, the sync of Mastermind's themes), so it follows the theme Jong picked rather than
+   the OS. This beats .dark and the light :root (more specific); opened anywhere else nothing is set and the console's
+   own light and dark above stand. Every other stylesheet here names no colour (theme/theme.test.ts). */
+:root[data-theme] {
+  color-scheme: dark;
+  --background: var(--mm-bg);
+  --foreground: var(--mm-text);
+  --card: var(--mm-surface);
+  --card-foreground: var(--mm-text);
+  --popover: var(--mm-raised);
+  --popover-foreground: var(--mm-text);
+  --primary: var(--mm-accent);
+  --primary-foreground: var(--mm-bg);
+  --secondary: var(--mm-surface-2);
+  --secondary-foreground: var(--mm-text);
+  --muted: var(--mm-surface-2);
+  --muted-foreground: var(--mm-muted);
+  --accent: var(--mm-raised);
+  --accent-foreground: var(--mm-text);
+  --destructive: var(--mm-hot);
+  --success: var(--mm-ok);
+  --warning: var(--mm-warn);
+  --border: color-mix(in srgb, var(--mm-text) 14%, var(--mm-surface));
+  --input: color-mix(in srgb, var(--mm-text) 18%, var(--mm-surface));
+  --ring: var(--mm-accent);
+  --chart-1: var(--mm-accent);
+  --chart-2: var(--mm-accent-2);
+  --chart-3: var(--mm-ok);
+  --chart-4: var(--mm-warn);
+  --chart-5: var(--mm-hot);
+  --sidebar: var(--mm-surface);
+  --sidebar-foreground: var(--mm-text);
+  --sidebar-primary: var(--mm-accent);
+  --sidebar-primary-foreground: var(--mm-bg);
+  --sidebar-accent: var(--mm-raised);
+  --sidebar-accent-foreground: var(--mm-text);
+  --sidebar-border: color-mix(in srgb, var(--mm-text) 14%, var(--mm-surface));
+  --sidebar-ring: var(--mm-accent);
 }
 /* Unlayered, like the :root default above: normal declarations outside a cascade
    layer beat every layered one, so these lose from inside `@layer base`. */
