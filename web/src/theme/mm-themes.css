@@ -1,0 +1,29 @@
+/* Mastermind's themes (TH-670), written by web/scripts/sync-themes.mjs from themes.mjs, the copy of mastermind's
+   src/shared/themes.mjs: never edit by hand. The bare :root is the default theme's (the page opened outside
+   Mastermind); the boot script sets data-theme from ?theme= and from Mastermind's message. */
+:root {
+  --mm-bg: #0b0806;
+  --mm-surface: #120d09;
+  --mm-surface-2: #17110c;
+  --mm-raised: #211810;
+  --mm-text: #f4e7d9;
+  --mm-muted: #b39a82;
+  --mm-accent: #ff9f43;
+  --mm-accent-2: #3fd6c6;
+  --mm-ok: #7be495;
+  --mm-warn: #ffd166;
+  --mm-hot: #ff6b5b;
+  --mm-hot-text: #ffc9c0;
+}
+:root[data-theme="ember"] { --mm-bg: #0b0806; --mm-surface: #120d09; --mm-surface-2: #17110c; --mm-raised: #211810; --mm-text: #f4e7d9; --mm-muted: #b39a82; --mm-accent: #ff9f43; --mm-accent-2: #3fd6c6; --mm-ok: #7be495; --mm-warn: #ffd166; --mm-hot: #ff6b5b; --mm-hot-text: #ffc9c0; }
+:root[data-theme="neon"] { --mm-bg: #04050a; --mm-surface: #04060e; --mm-surface-2: #060a16; --mm-raised: #0b1222; --mm-text: #cfe9ff; --mm-muted: #7f93ad; --mm-accent: #00e5ff; --mm-accent-2: #ff2bd6; --mm-ok: #2bff9e; --mm-warn: #ffb020; --mm-hot: #ff4d5e; --mm-hot-text: #ffc2c8; }
+:root[data-theme="matrix"] { --mm-bg: #030803; --mm-surface: #061006; --mm-surface-2: #081408; --mm-raised: #0e1f0e; --mm-text: #d4f7d4; --mm-muted: #86b086; --mm-accent: #39ff88; --mm-accent-2: #d4ff4a; --mm-ok: #9cff6e; --mm-warn: #ffd84a; --mm-hot: #ff6e6e; --mm-hot-text: #ffc4c4; }
+:root[data-theme="arctic"] { --mm-bg: #070a10; --mm-surface: #0b1018; --mm-surface-2: #0e141e; --mm-raised: #16202e; --mm-text: #e6eef8; --mm-muted: #93a3b8; --mm-accent: #7cc4ff; --mm-accent-2: #c3b1ff; --mm-ok: #7ee0b0; --mm-warn: #ffd27a; --mm-hot: #ff7a85; --mm-hot-text: #ffcbd0; }
+:root[data-theme="synthwave"] { --mm-bg: #0d0716; --mm-surface: #140b21; --mm-surface-2: #190e29; --mm-raised: #24143a; --mm-text: #f6e6ff; --mm-muted: #b49ac8; --mm-accent: #ff6ec7; --mm-accent-2: #ffd23f; --mm-ok: #5ef2c0; --mm-warn: #ffb347; --mm-hot: #ff5c7a; --mm-hot-text: #ffc4d0; }
+:root[data-theme="aurora"] { --mm-bg: #050b0d; --mm-surface: #08121a; --mm-surface-2: #0a1620; --mm-raised: #11222e; --mm-text: #dff6f3; --mm-muted: #8fb0ad; --mm-accent: #5eead4; --mm-accent-2: #b9a2ff; --mm-ok: #8af07a; --mm-warn: #ffd166; --mm-hot: #ff7b7b; --mm-hot-text: #ffc8c8; }
+:root[data-theme="crimson"] { --mm-bg: #0c0506; --mm-surface: #14090a; --mm-surface-2: #190b0d; --mm-raised: #261114; --mm-text: #fbe4e4; --mm-muted: #bf9a9a; --mm-accent: #ff6161; --mm-accent-2: #ffc861; --mm-ok: #7ddf9b; --mm-warn: #ffb05c; --mm-hot: #ff4f8b; --mm-hot-text: #ffc4d6; }
+:root[data-theme="solar"] { --mm-bg: #0b0903; --mm-surface: #141006; --mm-surface-2: #191408; --mm-raised: #251e0d; --mm-text: #fbf3d9; --mm-muted: #bfae84; --mm-accent: #ffd23f; --mm-accent-2: #ff8a65; --mm-ok: #a6e36f; --mm-warn: #ffb84d; --mm-hot: #ff6f61; --mm-hot-text: #ffcbc4; }
+:root[data-theme="graphite"] { --mm-bg: #0a0a0b; --mm-surface: #111113; --mm-surface-2: #151517; --mm-raised: #1f1f22; --mm-text: #ececec; --mm-muted: #a3a3a8; --mm-accent: #dcdcdc; --mm-accent-2: #9ec5ff; --mm-ok: #8fdc9b; --mm-warn: #f2c46d; --mm-hot: #ff7f7f; --mm-hot-text: #ffcccc; }
+:root[data-theme="ocean"] { --mm-bg: #040912; --mm-surface: #07101e; --mm-surface-2: #091426; --mm-raised: #0f1f38; --mm-text: #e2efff; --mm-muted: #8ea6c4; --mm-accent: #4db2ff; --mm-accent-2: #2ee6c5; --mm-ok: #6fe39a; --mm-warn: #ffcc5c; --mm-hot: #ff6f7d; --mm-hot-text: #ffc7cd; }
+:root[data-theme="black"] { --mm-bg: #000000; --mm-surface: #0a0a0a; --mm-surface-2: #101010; --mm-raised: #181818; --mm-text: #f2f2f2; --mm-muted: #a3a3a3; --mm-accent: #ffffff; --mm-accent-2: #b4c6dc; --mm-ok: #7fd99a; --mm-warn: #f5c76a; --mm-hot: #ff7a7a; --mm-hot-text: #ffcaca; }
+:root[data-theme="dark"] { --mm-bg: #121212; --mm-surface: #1a1a1a; --mm-surface-2: #202020; --mm-raised: #2a2a2a; --mm-text: #e8e8e8; --mm-muted: #a8a8a8; --mm-accent: #cfcfcf; --mm-accent-2: #a9bccc; --mm-ok: #81c995; --mm-warn: #fdd663; --mm-hot: #f28b82; --mm-hot-text: #ffd0cb; }

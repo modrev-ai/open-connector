@@ -36,7 +36,18 @@ function getSystemTheme(): ResolvedThemeMode {
   return window.matchMedia(darkSchemeQuery).matches ? "dark" : "light";
 }
 
+/**
+ * TH-670: whether Mastermind is showing this console on one of its themes (public/theme-boot.js set data-theme). Every
+ * Mastermind theme is dark, so then the page is dark whatever the OS or the stored mode says.
+ */
+export function mastermindThemed(): boolean {
+  return typeof document !== "undefined" && document.documentElement.hasAttribute("data-theme");
+}
+
 function resolveTheme(theme: ThemeMode): ResolvedThemeMode {
+  if (mastermindThemed()) {
+    return "dark";
+  }
   return theme === "auto" ? getSystemTheme() : theme;
 }
 
