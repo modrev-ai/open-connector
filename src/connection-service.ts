@@ -64,6 +64,8 @@ export interface ConnectionServiceOptions {
   store: IConnectionStore;
   logger?: RuntimeLogger;
   marketplace?: MarketplaceService;
+  /** Transport for OAuth token revocation on disconnect; defaults to the guarded provider fetch. */
+  revocationFetch?: typeof fetch;
 }
 
 export interface StoredConnection {
@@ -78,6 +80,11 @@ export interface DisconnectedConnectionSummary {
   service: string;
   connectionName: string;
   configured: false;
+  /**
+   * Whether the provider confirmed the revocation of the stored OAuth grant. Present only when the provider declares
+   * a `revocationUrl` and an OAuth credential was stored; the credential is deleted locally either way.
+   */
+  revoked?: boolean;
 }
 
 export interface ExecutionConnection {
@@ -139,6 +146,7 @@ export class ConnectionService {
   private readonly store: IConnectionStore;
   private readonly logger?: RuntimeLogger;
   private readonly marketplace?: MarketplaceService;
+  private readonly revocationFetch: typeof fetch;
 
   constructor(input: ConnectionServiceOptions) {
     this.catalog = input.catalog;
@@ -147,6 +155,7 @@ export class ConnectionService {
     this.store = input.store;
     this.logger = input.logger;
     this.marketplace = input.marketplace;
+    this.revocationFetch = input.revocationFetch ?? providerFetch;
   }
 
   async listConnections(): Promise<ConnectionSummary[]> {
@@ -477,13 +486,47 @@ export class ConnectionService {
     connectionNameInput?: string,
   ): Promise<ConnectionSummary | DisconnectedConnectionSummary> {
     const connectionName = normalizeConnectionName(connectionNameInput);
-    await this.store.delete(service, connectionName);
     const provider = this.catalog.providers.find((provider) => provider.service === service);
+    const revoked = await this.revokeStoredOAuthGrant(provider, service, connectionName);
+    await this.store.delete(service, connectionName);
     if (provider && this.supportsAuth(provider, "no_auth")) {
       return this.connectWithoutAuth(service, { connectionName });
     }
 
-    return { service, connectionName, configured: false };
+    return revoked === undefined ? { service, connectionName, configured: false } : { service, connectionName, configured: false, revoked };
+  }
+
+  /**
+   * RFC 7009: when the provider declares a `revocationUrl` and the stored credential is OAuth, post its refresh token
+   * (else its access token) there. Returns whether the provider answered 2xx, or undefined when nothing applied. A
+   * failure never blocks the local delete, and neither the token nor the provider's answer is logged.
+   */
+  private async revokeStoredOAuthGrant(
+    provider: ProviderDefinition | undefined,
+    service: string,
+    connectionName: string,
+  ): Promise<boolean | undefined> {
+    const auth = provider?.auth.find((auth) => auth.type === "oauth2");
+    if (!auth || auth.type !== "oauth2" || !auth.revocationUrl) return undefined;
+    const stored = await this.store.get(service, connectionName);
+    if (stored?.credential.authType !== "oauth2") return undefined;
+    const token = stored.credential.refreshToken || stored.credential.accessToken;
+    if (!token) return undefined;
+    try {
+      const response = await this.revocationFetch(auth.revocationUrl, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token }).toString(),
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
+      await response.body?.cancel().catch(() => {});
+      this.logger?.info({ operation: "disconnect", service, connectionName, status: response.status }, "oauth grant revocation answered");
+      return response.ok;
+    } catch {
+      this.logger?.warn({ operation: "disconnect", service, connectionName }, "oauth grant revocation failed");
+      return false;
+    }
   }
 
   private createConfiguredConnectionSummary(
