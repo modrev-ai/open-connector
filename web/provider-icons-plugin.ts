@@ -38,15 +38,26 @@ export function providerIconsPlugin(options: ProviderIconsPluginOptions = {}): P
   };
 }
 
-async function loadProviderIconsModule(): Promise<string> {
-  const response = await fetch(catalogUrl);
-  if (!response.ok) {
-    throw new Error(`Could not load OOMOL provider icons: ${response.status} ${response.statusText}`);
+/**
+ * TH-791: the catalog is optional decoration. On 2026-11-11 the URL answered 404 and failed every image build, so an
+ * unreachable or malformed catalog now builds with no icons (the UI falls back to letters), with one warning.
+ */
+async function loadProviderIconsModule(fetchImpl: typeof fetch = fetch): Promise<string> {
+  let payload: CatalogPayload;
+  try {
+    const response = await fetchImpl(catalogUrl);
+    if (!response.ok) {
+      console.warn(`[provider-icons] catalog answered ${response.status} ${response.statusText}; building without icons`);
+      return serializeProviderIcons({});
+    }
+    payload = (await response.json()) as CatalogPayload;
+  } catch (error) {
+    console.warn(`[provider-icons] catalog unreachable (${(error as Error).message}); building without icons`);
+    return serializeProviderIcons({});
   }
-
-  const payload = (await response.json()) as CatalogPayload;
   if (!Array.isArray(payload.items)) {
-    throw new Error("Could not load OOMOL provider icons: catalog.items is not an array");
+    console.warn("[provider-icons] catalog.items is not an array; building without icons");
+    return serializeProviderIcons({});
   }
 
   const iconUrls: Record<string, string> = {};
