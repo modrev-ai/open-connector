@@ -6,6 +6,11 @@
 # Start the stack with all three files:
 #   docker compose -f docker-compose.yml -f docker-compose.override.yml \
 #     -f docker-compose.fork.yml --env-file <the hub's open-connector.env> up -d
+# The --env-file is NOT optional (TH-791, 2026-11-11): the stored connections are encrypted with its
+# OOMOL_CONNECT_ENCRYPTION_KEY. After the 2026-11-10 reboot the stack came up from the first two files
+# without it, so every connection read failed with "enc:v1... is not valid JSON" until it was restarted
+# with the env file. The hub's file is C:\Workstation\mcp-gateway\hub\.run\open-connector.env.
+# Build a new tag with: docker build -f docker/Dockerfile -t modrev/open-connector:fork-<sha> .
 services:
   connector:
-    image: modrev/open-connector:fork-833f5a6
+    image: modrev/open-connector:fork-0dbda49d
