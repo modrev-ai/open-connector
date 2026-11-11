@@ -79,6 +79,7 @@ const scenarioByService = new Map<string, ProviderScenario>([
   ["googlesearchconsole", "marketing"],
   ["googlesheets", "productivity"],
   ["googletasks", "productivity"],
+  ["googlecontacts", "productivity"],
   ["hubspot", "marketing"],
   ["helium10", "cross-border-ecommerce"],
   ["hithinkfinance", "investment"],
