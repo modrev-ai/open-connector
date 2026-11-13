@@ -15,6 +15,96 @@ interface GoogledriveActionSource {
   outputSchema: JsonSchema;
 }
 
+const nullableString = (description: string): JsonSchema => ({
+  anyOf: [{ type: "string" }, { type: "null" }],
+  description,
+});
+const optionalInteger = (description: string): JsonSchema => ({ type: "integer", description });
+
+/// The file metadata a catalogue needs beyond the basics, on every file row the executors normalize. Metadata only:
+/// nothing here is derived from the file's content (no `contentHints`, no `thumbnailLink`), and each member is present
+/// only when Drive answered it. The executors' `driveFileFields` asks Drive for exactly these.
+const driveFileMetadataProperties: Record<string, JsonSchema> = {
+  lastModifyingUser: {
+    type: "object",
+    properties: {
+      displayName: nullableString("The display name of the user who last modified the file."),
+      emailAddress: nullableString("The email address of the user who last modified the file."),
+      permissionId: nullableString("The permission ID of the user who last modified the file."),
+    },
+    required: ["displayName", "emailAddress", "permissionId"],
+    additionalProperties: false,
+    description: "The last user to modify the file. Absent when Drive did not answer it.",
+  },
+  md5Checksum: { type: "string", description: "The MD5 checksum Drive keeps for a blob file's content." },
+  fileExtension: { type: "string", description: "The final component of fullFileExtension." },
+  fullFileExtension: { type: "string", description: "The full file extension, extracted from the name." },
+  description: { type: "string", description: "The file's Drive description, as its owner wrote it." },
+  properties: {
+    type: "object",
+    additionalProperties: { type: "string" },
+    description: "Arbitrary key-value pairs visible to all apps.",
+  },
+  appProperties: {
+    type: "object",
+    additionalProperties: { type: "string" },
+    description: "Key-value pairs private to the requesting app.",
+  },
+  imageMediaMetadata: {
+    type: "object",
+    properties: {
+      width: optionalInteger("The image width in pixels."),
+      height: optionalInteger("The image height in pixels."),
+      rotation: optionalInteger(
+        "The number of clockwise 90 degree rotations applied from the image's original orientation.",
+      ),
+      time: { type: "string", description: "The date and time the photo was taken (EXIF DateTime)." },
+      cameraMake: { type: "string", description: "The make of the camera used to create the photo." },
+      cameraModel: { type: "string", description: "The model of the camera used to create the photo." },
+    },
+    additionalProperties: false,
+    description: "Size, camera and date taken of an image. No location is projected.",
+  },
+  videoMediaMetadata: {
+    type: "object",
+    properties: {
+      width: optionalInteger("The video width in pixels."),
+      height: optionalInteger("The video height in pixels."),
+      durationMillis: optionalInteger("The duration of the video in milliseconds."),
+    },
+    additionalProperties: false,
+    description: "Size and duration of a video.",
+  },
+  shortcutDetails: {
+    type: "object",
+    properties: {
+      targetId: { type: "string", description: "The ID of the file this shortcut points to." },
+      targetMimeType: { type: "string", description: "The MIME type of the file this shortcut points to." },
+    },
+    additionalProperties: false,
+    description: "Where a shortcut points. Present on shortcuts only.",
+  },
+  sharedWithMeTime: {
+    type: "string",
+    description: "The time the file was shared with the user, if applicable (RFC 3339 date-time).",
+  },
+  iconLink: { type: "string", description: "A static, unauthenticated link to the file's type icon." },
+};
+
+/// A shared drive as a change carries it (`changes(drive(...))`), for a change whose changeType is drive.
+const changeDriveSchema: JsonSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "The ID of the shared drive." },
+    name: nullableString("The name of the shared drive."),
+    hidden: { type: "boolean", description: "Whether the shared drive is hidden from default view." },
+    createdTime: nullableString("The time at which the shared drive was created (RFC 3339 date-time)."),
+  },
+  required: ["id", "name", "createdTime"],
+  additionalProperties: false,
+  description: "The changed shared drive, when the change is for a shared drive and Drive answered it.",
+};
+
 const actionSources: GoogledriveActionSource[] = [
   {
     name: "about.get",
@@ -412,6 +502,7 @@ const actionSources: GoogledriveActionSource[] = [
                     description:
                       "The subset of Drive capabilities this provider projects. Absent when Drive did not answer it.",
                   },
+                  ...driveFileMetadataProperties,
                 },
                 required: [
                   "id",
@@ -426,6 +517,7 @@ const actionSources: GoogledriveActionSource[] = [
                 additionalProperties: false,
                 description: "The updated state of the file, if the change is for a file and the file still exists.",
               },
+              drive: changeDriveSchema,
             },
             required: ["id", "kind", "changeType", "time", "fileId", "driveId"],
             additionalProperties: false,
@@ -1716,6 +1808,7 @@ const actionSources: GoogledriveActionSource[] = [
             description:
               "The subset of Drive capabilities this provider projects. Absent when Drive did not answer it.",
           },
+          ...driveFileMetadataProperties,
         },
         required: ["id", "name", "mimeType", "webViewLink", "createdTime", "modifiedTime", "sizeBytes", "driveId"],
         additionalProperties: false,
@@ -1973,6 +2066,7 @@ const actionSources: GoogledriveActionSource[] = [
                 description:
                   "The subset of Drive capabilities this provider projects. Absent when Drive did not answer it.",
               },
+              ...driveFileMetadataProperties,
             },
             required: ["id", "name", "mimeType", "webViewLink", "createdTime", "modifiedTime", "sizeBytes", "driveId"],
             additionalProperties: false,
@@ -5375,6 +5469,7 @@ const actionSources: GoogledriveActionSource[] = [
           additionalProperties: false,
           description: "The subset of Drive capabilities this provider projects. Absent when Drive did not answer it.",
         },
+        ...driveFileMetadataProperties,
       },
       required: ["id", "name", "mimeType", "webViewLink", "createdTime", "modifiedTime", "sizeBytes", "driveId"],
       additionalProperties: false,
@@ -5612,6 +5707,7 @@ const actionSources: GoogledriveActionSource[] = [
           additionalProperties: false,
           description: "The subset of Drive capabilities this provider projects. Absent when Drive did not answer it.",
         },
+        ...driveFileMetadataProperties,
       },
       required: ["id", "name", "mimeType", "webViewLink", "createdTime", "modifiedTime", "sizeBytes", "driveId"],
       additionalProperties: false,
@@ -6258,6 +6354,7 @@ const actionSources: GoogledriveActionSource[] = [
           additionalProperties: false,
           description: "The subset of Drive capabilities this provider projects. Absent when Drive did not answer it.",
         },
+        ...driveFileMetadataProperties,
       },
       required: ["id", "name", "mimeType", "webViewLink", "createdTime", "modifiedTime", "sizeBytes", "driveId"],
       additionalProperties: false,
