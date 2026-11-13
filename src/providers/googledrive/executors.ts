@@ -3,7 +3,7 @@ import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
 import { randomUUID } from "node:crypto";
-import { requiredRawString, requiredString } from "../../core/cast.ts";
+import { optionalInteger, optionalRecord, requiredRawString, requiredString } from "../../core/cast.ts";
 import { readBoundedResponseBytes } from "../../core/request.ts";
 import {
   defineProviderProxy,
@@ -88,6 +88,23 @@ const driveFileFields = [
   // the requested members, so the shape is `{ canShare }`.
   "ownedByMe",
   "capabilities(canShare)",
+  // Catalogue metadata (actions.ts `driveFileMetadataProperties`): who last edited it, the checksum and extension Drive
+  // keeps, the owner's Drive description and properties, an image's size, camera and date taken, a video's size and
+  // duration, where a shortcut points, and when it was shared with the caller. METADATA ONLY: nothing derived from the
+  // content is asked for, so never `contentHints` (its indexableText and thumbnail come from the content) and never
+  // `thumbnailLink`; and an image's location is left out.
+  "lastModifyingUser(displayName,emailAddress,permissionId)",
+  "md5Checksum",
+  "fileExtension",
+  "fullFileExtension",
+  "description",
+  "properties",
+  "appProperties",
+  "imageMediaMetadata(width,height,rotation,time,cameraMake,cameraModel)",
+  "videoMediaMetadata(width,height,durationMillis)",
+  "shortcutDetails(targetId,targetMimeType)",
+  "sharedWithMeTime",
+  "iconLink",
 ].join(",");
 const driveFields = [
   "id",
@@ -102,7 +119,10 @@ const driveFields = [
   "capabilities",
   "restrictions",
 ].join(",");
-const changeListFields = `nextPageToken,newStartPageToken,changes(fileId,kind,changeType,removed,time,driveId,file(${driveFileFields}))`;
+// A change for a shared drive carries the drive itself, so a consumer can apply a rename or a hide without another
+// drives.list.
+const changeDriveFields = "id,name,hidden,createdTime";
+const changeListFields = `nextPageToken,newStartPageToken,changes(fileId,kind,changeType,removed,time,driveId,drive(${changeDriveFields}),file(${driveFileFields}))`;
 type ActionContext = OAuthProviderContext;
 
 type ActionHandler = (input: Record<string, unknown>, context: ActionContext) => Promise<unknown>;
@@ -839,7 +859,96 @@ function normalizeDriveFile(payload: Record<string, unknown>) {
     ...(typeof asOptionalObject(payload.capabilities)?.canShare === "boolean"
       ? { capabilities: { canShare: asOptionalObject(payload.capabilities)!.canShare as boolean } }
       : {}),
+    // The catalogue metadata `driveFileFields` asks for, each only when Drive answered it (undefined drops out of the
+    // JSON): metadata only, never anything read from the content.
+    lastModifyingUser: normalizeDriveUser(payload.lastModifyingUser),
+    md5Checksum: optionalString(payload.md5Checksum),
+    fileExtension: optionalString(payload.fileExtension),
+    fullFileExtension: optionalString(payload.fullFileExtension),
+    description: optionalString(payload.description),
+    properties: normalizeStringMap(payload.properties),
+    appProperties: normalizeStringMap(payload.appProperties),
+    imageMediaMetadata: normalizeImageMetadata(payload.imageMediaMetadata),
+    videoMediaMetadata: normalizeVideoMetadata(payload.videoMediaMetadata),
+    shortcutDetails: normalizeShortcutDetails(payload.shortcutDetails),
+    sharedWithMeTime: optionalString(payload.sharedWithMeTime),
+    iconLink: optionalString(payload.iconLink),
   };
+}
+
+function normalizeDriveUser(value: unknown) {
+  const user = optionalRecord(value);
+  if (!user) {
+    return undefined;
+  }
+  return {
+    displayName: optionalString(user.displayName) ?? null,
+    emailAddress: optionalString(user.emailAddress) ?? null,
+    permissionId: optionalString(user.permissionId) ?? null,
+  };
+}
+
+function normalizeStringMap(value: unknown) {
+  const map = optionalRecord(value);
+  if (!map) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(map).flatMap(([key, child]) => (typeof child === "string" ? [[key, child]] : [])),
+  );
+}
+
+function normalizeImageMetadata(value: unknown) {
+  const image = optionalRecord(value);
+  if (!image) {
+    return undefined;
+  }
+  // Size, camera and date taken only: `location` is never asked for, and is not passed on if Drive sends it anyway.
+  return compactUnknownObject({
+    width: optionalInteger(image.width),
+    height: optionalInteger(image.height),
+    rotation: optionalInteger(image.rotation),
+    time: optionalString(image.time),
+    cameraMake: optionalString(image.cameraMake),
+    cameraModel: optionalString(image.cameraModel),
+  });
+}
+
+function normalizeVideoMetadata(value: unknown) {
+  const video = optionalRecord(value);
+  if (!video) {
+    return undefined;
+  }
+  return compactUnknownObject({
+    width: optionalInteger(video.width),
+    height: optionalInteger(video.height),
+    // Drive sends the duration as an int64 string.
+    durationMillis: parseSizeBytes(video.durationMillis) ?? undefined,
+  });
+}
+
+function normalizeShortcutDetails(value: unknown) {
+  const shortcut = optionalRecord(value);
+  if (!shortcut) {
+    return undefined;
+  }
+  return compactUnknownObject({
+    targetId: optionalString(shortcut.targetId),
+    targetMimeType: optionalString(shortcut.targetMimeType),
+  });
+}
+
+function normalizeChangeDrive(value: unknown) {
+  const drive = optionalRecord(value);
+  if (!drive || !optionalString(drive.id)) {
+    return undefined;
+  }
+  return compactUnknownObject({
+    id: String(drive.id),
+    name: optionalString(drive.name) ?? null,
+    hidden: optionalBoolean(drive.hidden),
+    createdTime: optionalString(drive.createdTime) ?? null,
+  });
 }
 
 function resolveDriveId(input: Record<string, unknown>) {
@@ -1008,6 +1117,7 @@ function normalizeChange(payload: Record<string, unknown>) {
     time: optionalString(payload.time) ?? null,
     fileId: optionalString(payload.fileId) ?? null,
     driveId: optionalString(payload.driveId) ?? null,
+    drive: normalizeChangeDrive(payload.drive),
     file: asOptionalObject(payload.file) ? normalizeDriveFile(asOptionalObject(payload.file)!) : undefined,
   });
 }

@@ -264,6 +264,185 @@ describe("Google Drive files.list sharing capability", () => {
   });
 });
 
+describe("Google Drive catalogue metadata (TH-934)", () => {
+  const catalogueFields = [
+    "lastModifyingUser(displayName,emailAddress,permissionId)",
+    "md5Checksum",
+    "fileExtension",
+    "fullFileExtension",
+    "description",
+    "properties",
+    "appProperties",
+    "imageMediaMetadata(width,height,rotation,time,cameraMake,cameraModel)",
+    "videoMediaMetadata(width,height,durationMillis)",
+    "shortcutDetails(targetId,targetMimeType)",
+    "sharedWithMeTime",
+  ];
+
+  /// Asserted on the request: `fields` is an allow-list, so a member missing here is one Drive never sends.
+  it("asks files.list for the catalogue's metadata", async () => {
+    const requests = stubGoogleResponses([Response.json({ files: [] })]);
+
+    await executeList({});
+
+    const fields = requests[0]?.url.searchParams.get("fields") ?? "";
+    for (const field of catalogueFields) {
+      expect(fields).toContain(field);
+    }
+  });
+
+  /// NEGATIVE: metadata only. `contentHints` (indexableText, thumbnail) and `thumbnailLink` come from the content, and
+  /// an image's location is not part of what the catalogue keeps.
+  it("never asks for anything derived from the content, on files.list, files.get or changes.list", async () => {
+    const requests = stubGoogleResponses([
+      Response.json({ files: [] }),
+      Response.json({ id: "f-1", name: "a.txt", mimeType: "text/plain" }),
+      Response.json({ changes: [], newStartPageToken: "t-2" }),
+    ]);
+
+    await executeList({});
+    await executeGet({ fileId: "f-1" });
+    await executeChanges({ pageToken: "t-1" });
+
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      const fields = request.url.searchParams.get("fields") ?? "";
+      expect(fields).not.toBe("");
+      expect(fields).not.toMatch(/contentHints|indexableText|thumbnail|location|\*/);
+      expect(request.url.searchParams.get("alt")).toBeNull();
+    }
+  });
+
+  it("passes the metadata through with Drive's own names, and keeps the last editor", async () => {
+    stubGoogleResponses([
+      Response.json({
+        files: [
+          {
+            id: "img-1",
+            name: "beach.jpg",
+            mimeType: "image/jpeg",
+            lastModifyingUser: { displayName: "Editor One", emailAddress: "editor@example.com", permissionId: "p-1" },
+            md5Checksum: "0123456789abcdef0123456789abcdef",
+            fileExtension: "jpg",
+            fullFileExtension: "jpg",
+            description: "made-up description",
+            properties: { project: "alpha", count: 3 },
+            appProperties: { app: "x" },
+            imageMediaMetadata: {
+              width: 4000,
+              height: 3000,
+              time: "2024:07:01 10:00:00",
+              cameraMake: "Make",
+              cameraModel: "Model",
+              location: { latitude: 1 },
+            },
+            sharedWithMeTime: "2025-01-01T00:00:00Z",
+          },
+          {
+            id: "vid-1",
+            name: "clip.mp4",
+            mimeType: "video/mp4",
+            videoMediaMetadata: { width: 1920, height: 1080, durationMillis: "65000" },
+          },
+          {
+            id: "sc-1",
+            name: "Shared folder",
+            mimeType: "application/vnd.google-apps.shortcut",
+            shortcutDetails: { targetId: "f-9", targetMimeType: "application/vnd.google-apps.folder" },
+          },
+        ],
+      }),
+    ]);
+
+    const result = await executeList({});
+
+    const [image, video, shortcut] = (result.output as { files: Record<string, unknown>[] }).files;
+    expect(image?.lastModifyingUser).toEqual({
+      displayName: "Editor One",
+      emailAddress: "editor@example.com",
+      permissionId: "p-1",
+    });
+    expect(image?.md5Checksum).toBe("0123456789abcdef0123456789abcdef");
+    expect(image?.fileExtension).toBe("jpg");
+    expect(image?.fullFileExtension).toBe("jpg");
+    expect(image?.description).toBe("made-up description");
+    expect(image?.properties).toEqual({ project: "alpha" });
+    expect(image?.appProperties).toEqual({ app: "x" });
+    expect(image?.imageMediaMetadata).toEqual({
+      width: 4000,
+      height: 3000,
+      time: "2024:07:01 10:00:00",
+      cameraMake: "Make",
+      cameraModel: "Model",
+    });
+    expect(image?.sharedWithMeTime).toBe("2025-01-01T00:00:00Z");
+    expect(video?.videoMediaMetadata).toEqual({ width: 1920, height: 1080, durationMillis: 65000 });
+    expect(shortcut?.shortcutDetails).toEqual({
+      targetId: "f-9",
+      targetMimeType: "application/vnd.google-apps.folder",
+    });
+  });
+
+  it("omits each one when Drive did not answer it", async () => {
+    stubGoogleResponses([Response.json({ files: [{ id: "f-1", name: "a", mimeType: "text/plain" }] })]);
+
+    const result = await executeList({});
+
+    const file = (result.output as { files: Record<string, unknown>[] }).files[0]!;
+    for (const key of [
+      "lastModifyingUser",
+      "md5Checksum",
+      "description",
+      "properties",
+      "imageMediaMetadata",
+      "videoMediaMetadata",
+      "shortcutDetails",
+      "sharedWithMeTime",
+    ]) {
+      expect(file[key]).toBeUndefined();
+    }
+  });
+
+  it("asks changes.list for the drive and the file's metadata, and carries both", async () => {
+    const requests = stubGoogleResponses([
+      Response.json({
+        changes: [
+          {
+            changeType: "drive",
+            driveId: "d-1",
+            time: "2026-01-01T00:00:00Z",
+            drive: { id: "d-1", name: "Team", hidden: false, createdTime: "2020-01-01T00:00:00Z" },
+          },
+          {
+            changeType: "file",
+            fileId: "f-1",
+            time: "2026-01-01T00:00:01Z",
+            file: {
+              id: "f-1",
+              name: "a.pdf",
+              mimeType: "application/pdf",
+              lastModifyingUser: { displayName: "Editor One" },
+              md5Checksum: "ab",
+            },
+          },
+        ],
+        newStartPageToken: "t-2",
+      }),
+    ]);
+
+    const result = await executeChanges({ pageToken: "t-1" });
+
+    const fields = requests[0]?.url.searchParams.get("fields") ?? "";
+    expect(fields).toContain("drive(id,name,hidden,createdTime)");
+    expect(fields).toContain("lastModifyingUser(displayName,emailAddress,permissionId)");
+    const [drive, file] = (result.output as { changes: Record<string, any>[] }).changes;
+    expect(drive?.drive).toEqual({ id: "d-1", name: "Team", hidden: false, createdTime: "2020-01-01T00:00:00Z" });
+    expect(file?.drive).toBeUndefined();
+    expect(file?.file.lastModifyingUser).toEqual({ displayName: "Editor One", emailAddress: null, permissionId: null });
+    expect(file?.file.md5Checksum).toBe("ab");
+  });
+});
+
 describe("Google Drive OAuth credential validation", () => {
   it("requests only the About user field and uses its email address as the account id", async () => {
     const requests: CapturedRequest[] = [];
@@ -354,6 +533,18 @@ async function executeGet(input: Record<string, unknown>, transitFiles?: Transit
   return executeAction(
     provider.actions.find((action) => action.name === "files.get")!,
     executors["googledrive.files.get"],
+    input,
+    context,
+  );
+}
+
+async function executeChanges(input: Record<string, unknown>) {
+  const context: ExecutionContext = {
+    getCredential: async () => oauthCredential,
+  };
+  return executeAction(
+    provider.actions.find((action) => action.name === "changes.list")!,
+    executors["googledrive.changes.list"],
     input,
     context,
   );
