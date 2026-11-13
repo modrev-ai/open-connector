@@ -13,4 +13,4 @@
 # Build a new tag with: docker build -f docker/Dockerfile -t modrev/open-connector:fork-<sha> .
 services:
   connector:
-    image: modrev/open-connector:fork-0dbda49d
+    image: modrev/open-connector:fork-19c8a44e
