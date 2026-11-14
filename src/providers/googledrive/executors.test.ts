@@ -477,6 +477,41 @@ describe("Google Drive OAuth credential validation", () => {
   });
 });
 
+describe("Google Drive comments.list assignee (MRO-1024)", () => {
+  /// A Docs action item is a comment assigned to someone; Drive says so only in assigneeEmailAddress, and only when the
+  /// `fields` projection asks for it. Task Hub's PFC turns comments assigned to Jong into to-dos.
+  it("asks Drive for the assignee and the mentions", async () => {
+    const requests = stubGoogleResponses([Response.json({ comments: [] })]);
+
+    await executeComments({ fileId: "doc-1" });
+
+    const fields = requests[0]?.url.searchParams.get("fields") ?? "";
+    expect(requests[0]?.url.pathname).toBe("/drive/v3/files/doc-1/comments");
+    expect(fields).toContain("assigneeEmailAddress");
+    expect(fields).toContain("mentionedEmailAddresses");
+  });
+
+  it("passes them through, and a comment no one is assigned keeps none", async () => {
+    stubGoogleResponses([
+      Response.json({
+        comments: [
+          { id: "c1", kind: "drive#comment", content: "please review", createdTime: "2026-11-14T00:00:00Z", modifiedTime: "2026-11-14T00:00:00Z", htmlContent: "please review", resolved: false, assigneeEmailAddress: "owner@example.com", mentionedEmailAddresses: ["owner@example.com"] },
+          { id: "c2", kind: "drive#comment", content: "fyi", createdTime: "2026-11-14T00:00:00Z", modifiedTime: "2026-11-14T00:00:00Z", htmlContent: "fyi", resolved: false },
+        ],
+      }),
+    ]);
+
+    const result = await executeComments({ fileId: "doc-1" });
+
+    expect(result.ok).toBe(true);
+    const comments = (result as { output: { comments: Record<string, unknown>[] } }).output.comments;
+    expect(comments[0]?.assigneeEmailAddress).toBe("owner@example.com");
+    expect(comments[0]?.mentionedEmailAddresses).toEqual(["owner@example.com"]);
+    // CONTROL: the field is Drive's, never invented.
+    expect(comments[1]).not.toHaveProperty("assigneeEmailAddress");
+  });
+});
+
 function stubGoogleResponses(responses: Response[]): CapturedRequest[] {
   const requests: CapturedRequest[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -560,6 +595,18 @@ async function executeList(input: Record<string, unknown>) {
   return executeAction(
     provider.actions.find((action) => action.name === "files.list")!,
     executors["googledrive.files.list"],
+    input,
+    context,
+  );
+}
+
+async function executeComments(input: Record<string, unknown>) {
+  const context: ExecutionContext = {
+    getCredential: async () => oauthCredential,
+  };
+  return executeAction(
+    provider.actions.find((action) => action.name === "comments.list")!,
+    executors["googledrive.comments.list"],
     input,
     context,
   );

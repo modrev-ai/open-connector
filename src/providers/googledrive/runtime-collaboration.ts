@@ -57,6 +57,9 @@ const commentFields = [
   "htmlContent",
   "modifiedTime",
   "quotedFileContent",
+  // MRO-1024: who a comment is assigned to (a Docs action item) and who it mentions.
+  "assigneeEmailAddress",
+  "mentionedEmailAddresses",
   `replies(${replyFields})`,
 ].join(",");
 const revisionFields = [
@@ -698,6 +701,10 @@ function normalizeComment(payload: Record<string, unknown>) {
     htmlContent: optionalString(payload.htmlContent) ?? null,
     modifiedTime: optionalString(payload.modifiedTime) ?? null,
     quotedFileContent: asOptionalObject(payload.quotedFileContent),
+    assigneeEmailAddress: optionalString(payload.assigneeEmailAddress),
+    mentionedEmailAddresses: Array.isArray(payload.mentionedEmailAddresses)
+      ? payload.mentionedEmailAddresses.filter((e): e is string => typeof e === "string")
+      : undefined,
     replies: Array.isArray(payload.replies)
       ? payload.replies.map((reply) => normalizeReply(asObject(reply)))
       : undefined,
