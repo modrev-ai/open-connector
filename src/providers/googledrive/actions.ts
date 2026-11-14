@@ -726,6 +726,15 @@ const actionSources: GoogledriveActionSource[] = [
           ],
           description: "The last time the comment or any of its replies was modified (RFC 3339 date-time).",
         },
+        assigneeEmailAddress: {
+          type: "string",
+          description: "The email address of the user assigned to this comment (a Docs action item); absent when no one is.",
+        },
+        mentionedEmailAddresses: {
+          type: "array",
+          items: { type: "string" },
+          description: "The email addresses of the users mentioned in this comment.",
+        },
         quotedFileContent: {
           type: "object",
           properties: {},
@@ -1083,6 +1092,15 @@ const actionSources: GoogledriveActionSource[] = [
                   },
                 ],
                 description: "The last time the comment or any of its replies was modified (RFC 3339 date-time).",
+              },
+              assigneeEmailAddress: {
+                type: "string",
+                description: "The email address of the user assigned to this comment (a Docs action item); absent when no one is.",
+              },
+              mentionedEmailAddresses: {
+                type: "array",
+                items: { type: "string" },
+                description: "The email addresses of the users mentioned in this comment.",
               },
               quotedFileContent: {
                 type: "object",
@@ -4035,6 +4053,15 @@ const actionSources: GoogledriveActionSource[] = [
           ],
           description: "The last time the comment or any of its replies was modified (RFC 3339 date-time).",
         },
+        assigneeEmailAddress: {
+          type: "string",
+          description: "The email address of the user assigned to this comment (a Docs action item); absent when no one is.",
+        },
+        mentionedEmailAddresses: {
+          type: "array",
+          items: { type: "string" },
+          description: "The email addresses of the users mentioned in this comment.",
+        },
         quotedFileContent: {
           type: "object",
           properties: {},
@@ -4425,6 +4452,15 @@ const actionSources: GoogledriveActionSource[] = [
             },
           ],
           description: "The last time the comment or any of its replies was modified (RFC 3339 date-time).",
+        },
+        assigneeEmailAddress: {
+          type: "string",
+          description: "The email address of the user assigned to this comment (a Docs action item); absent when no one is.",
+        },
+        mentionedEmailAddresses: {
+          type: "array",
+          items: { type: "string" },
+          description: "The email addresses of the users mentioned in this comment.",
         },
         quotedFileContent: {
           type: "object",
