@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -478,7 +478,9 @@ function scanCloneClasses(): Record<string, CloneMatch[]> {
   }
 
   for (const path of providerSourceFiles(providersDir)) {
-    const file = relative(repositoryRoot, path);
+    // Baseline keys and ownerFile are POSIX paths; on Windows relative() returns backslashes, which would read
+    // every committed entry as shrunk to zero and every file's copies as new ones.
+    const file = relative(repositoryRoot, path).split(sep).join("/");
     const text = readFileSync(path, "utf8");
     for (const cloneClass of cloneClasses) {
       if (cloneClass.ownerFile === file) {

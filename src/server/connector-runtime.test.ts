@@ -1,9 +1,11 @@
 import type { ConnectorRuntime, ConnectorRuntimeOptions } from "./connector-runtime.ts";
 
-import { cp, mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sortProviders } from "../core/catalog.ts";
+import { provider as githubProvider } from "../providers/github/definition.ts";
 import { createConnectorRuntime } from "./connector-runtime.ts";
 
 let runtime: ConnectorRuntime | undefined;
@@ -178,8 +180,12 @@ async function fixture(): Promise<ConnectorRuntimeOptions> {
   directories.push(root);
   const catalogDir = join(root, "catalog");
   await mkdir(catalogDir);
-  for (const service of ["github"])
-    await cp(resolve(import.meta.dirname, `../../catalog/apps/${service}.json`), join(catalogDir, `${service}.json`));
+  // Build the catalog entry from the provider source the way scripts/generate-catalog.ts does, rather than copying
+  // catalog/apps/github.json: catalog/ is git-ignored and only exists after postinstall ran, so a fresh worktree
+  // (the batch gate's, or one sharing another checkout's node_modules) has none.
+  for (const app of sortProviders([githubProvider]))
+    await writeFile(join(catalogDir, `${app.service}.json`), `${JSON.stringify(app, null, 2)}
+`);
   return {
     dataDir: join(root, "state"),
     publicOrigin,
