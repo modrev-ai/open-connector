@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { providerErrorCodes } from "../server/api/runtime-api.ts";
@@ -425,7 +425,9 @@ interface ProviderSource {
 
 const providerSources: ProviderSource[] = listProviderSourceFiles(providersDirectory).map((file) => {
   const source = readFileSync(file, "utf8");
-  return { file: relative(providersDirectory, file), source, lines: source.split("\n") };
+  // providerScopeOf splits on "/", so the path must be POSIX. On Windows relative() returns backslashes, which put
+  // every file in the shared scope and let one provider's helper signature stand in for another's.
+  return { file: relative(providersDirectory, file).split(sep).join("/"), source, lines: source.split("\n") };
 });
 
 const sourceIndexes = new Map<string, SourceIndex>();

@@ -1026,6 +1026,9 @@ describe("OAuthFlowService", () => {
 
   it("stores the token returned by a provider OAuth runtime", async () => {
     let callbackParameters: Record<string, string> | undefined;
+    // Relative to now: a fixed date expires as the calendar passes it, and getCredential then refuses the token
+    // because this runtime cannot refresh it (oauth_refresh_unavailable).
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const services = createServices([oauthProvider], {
       oauthRuntime: {
         async exchangeCode(input) {
@@ -1034,7 +1037,7 @@ describe("OAuthFlowService", () => {
             accessToken: "provider-access-token",
             refreshToken: "provider-access-token",
             tokenType: "Bearer",
-            expiresAt: "2026-10-30T00:00:00.000Z",
+            expiresAt,
             providerSecret: { inventory: "provider-owned" },
             metadata: { permissions: "read,write" },
           };
@@ -1059,7 +1062,7 @@ describe("OAuthFlowService", () => {
       authType: "oauth2",
       accessToken: "provider-access-token",
       refreshToken: "provider-access-token",
-      expiresAt: "2026-10-30T00:00:00.000Z",
+      expiresAt,
       providerSecret: { inventory: "provider-owned" },
       metadata: { permissions: "read,write" },
     });
